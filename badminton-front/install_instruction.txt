@@ -1,0 +1,13 @@
+npm create vite@latest
+
+The wizard will prompt you with a few questions:
+
+? Project name: Type badminton-frontend (or your preferred project name) and press Enter.
+? Select a framework: Use the arrow keys to select React and press Enter.
+? Select a variant: Use the arrow keys to select JavaScript (or TypeScript if you prefer that for your project) and press Enter.
+
+cd badminton-frontend
+
+npm install
+npm run dev
+

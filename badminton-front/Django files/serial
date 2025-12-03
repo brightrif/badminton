@@ -1,0 +1,34 @@
+from rest_framework import serializers
+from .models import Player, Sponsor, Match
+
+class PlayerSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Player
+        fields = ['id', 'name', 'country', 'country_code', 'photo_url']
+
+class SponsorSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Sponsor
+        fields = ['name', 'logo_url']
+
+class MatchSerializer(serializers.ModelSerializer):
+    player1 = PlayerSerializer()
+    player2 = PlayerSerializer()
+    score = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Match
+        fields = ['id', 'tournament', 'match_type', 'player1', 'player2', 'score', 'status', 'server_id']
+
+    def get_score(self, obj):
+        return {
+            'game1_player1': obj.game1_player1,
+            'game1_player2': obj.game1_player2,
+            'game2_player1': obj.game2_player1,
+            'game2_player2': obj.game2_player2,
+            'game3_player1': obj.game3_player1,
+            'game3_player2': obj.game3_player2,
+            'current_game': obj.current_game,
+            'player1_sets': obj.player1_sets,
+            'player2_sets': obj.player2_sets,
+        }

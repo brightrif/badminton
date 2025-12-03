@@ -1,0 +1,129 @@
+import React, { useState, useEffect } from 'react';
+import { Dot } from 'lucide-react';
+import PlayerCard from './components/PlayerCard';
+import SponsorDisplay from './components/SponsorDisplay';
+import SetScores from './components/SetScores';
+import { fetchMatchData, fetchSponsors } from './api/matches';
+import { connectWebSocket } from './api/websocket';
+import { toast, ToastContainer } from 'react-toastify';
+import 'react-toastify/dist/ReactToastify.css';
+
+export default function App() {
+  const [matchData, setMatchData] = useState(null);
+  const [sponsors, setSponsors] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  const matchId = 1; // Example: Replace with dynamic match ID (e.g., from URL params)
+
+  useEffect(() => {
+    const loadData = async () => {
+      try {
+        setIsLoading(true);
+        const [match, sponsorsData] = await Promise.all([
+          fetchMatchData(matchId),
+          fetchSponsors(),
+        ]);
+        setMatchData(match);
+        setSponsors(sponsorsData);
+      } catch (error) {
+        toast.error('Failed to load match data');
+        console.error(error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    loadData();
+  }, [matchId]);
+
+  useEffect(() => {
+    if (matchData?.status === 'Live') {
+      const ws = connectWebSocket(matchId, (scoreUpdate) => {
+        setMatchData((prev) => ({
+          ...prev,
+          score: { ...prev.score, ...scoreUpdate },
+          server_id: scoreUpdate.server_id,
+        }));
+      });
+      return () => ws.close();
+    }
+  }, [matchData?.status, matchId]);
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-blue-900 to-indigo-900 text-white">
+        <div className="text-xl font-inter">Loading match data...</div>
+      </div>
+    );
+  }
+
+  if (!matchData) {
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-blue-900 to-indigo-900 text-white">
+        <div className="text-xl font-inter">No match data available.</div>
+      </div>
+    );
+  }
+
+  const { player1, player2, score, tournament, match_type, status, server_id } = matchData;
+  const isPlayer1Serving = server_id === player1.id;
+  const isPlayer2Serving = server_id === player2.id;
+
+  const getGameScore = (gameNum, playerNum) => {
+    const scoreKey = `game${gameNum}_player${playerNum}`;
+    return score[scoreKey] !== undefined ? score[scoreKey] : '-';
+  };
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-blue-900 to-indigo-900 text-white font-inter p-4 sm:p-6 md:p-8 flex flex-col items-center">
+      <div className="w-full max-w-4xl text-center mb-6">
+        <h1 className="text-3xl sm:text-4xl font-bold text-yellow-400 mb-2 rounded-lg py-2 px-4 bg-blue-800 shadow-lg">
+          {tournament}
+        </h1>
+        <h2 className="text-xl sm:text-2xl font-semibold text-gray-200 mb-4 rounded-lg py-1 px-3 bg-blue-700 shadow-md">
+          {match_type}
+        </h2>
+      </div>
+
+      <div className="w-full max-w-4xl bg-blue-800 rounded-2xl shadow-2xl p-4 sm:p-6 md:p-8 flex flex-col items-center relative overflow-hidden">
+        <div className="absolute top-4 right-4 bg-red-600 text-white text-sm font-bold px-3 py-1 rounded-full shadow-md">
+          {status}
+        </div>
+
+        <div className="flex flex-col sm:flex-row justify-around items-center w-full mb-6 gap-6">
+          <PlayerCard player={player1} isServing={isPlayer1Serving} />
+          <div className="flex flex-col items-center justify-center text-5xl font-extrabold text-yellow-400 mx-4">
+            <span className="text-2xl font-bold text-gray-300">VS</span>
+            <div className="flex items-center mt-2">
+              <span className="text-6xl font-bold">{score[`game${score.current_game}_player1`]}</span>
+              <span className="text-6xl font-bold mx-2">-</span>
+              <span className="text-6xl font-bold">{score[`game${score.current_game}_player2`]}</span>
+            </div>
+            <span className="text-xl text-gray-300 mt-1">Game {score.current_game}</span>
+          </div>
+          <PlayerCard player={player2} isServing={isPlayer2Serving} />
+        </div>
+
+        <div className="w-full flex justify-center mb-6">
+          <SetScores
+            player1Name={player1.name}
+            player2Name={player2.name}
+            score={score}
+            getGameScore={getGameScore}
+          />
+        </div>
+      </div>
+
+      <div className="w-full max-w-4xl bg-blue-800 rounded-2xl shadow-2xl p-4 sm:p-6 md:p-8 mt-8">
+        <h3 className="text-2xl font-bold text-yellow-400 text-center mb-6">Our Sponsors</h3>
+        <div className="flex flex-wrap justify-center items-center gap-6">
+          {sponsors.map((sponsor, index) => (
+            <SponsorDisplay key={index} sponsor={sponsor} />
+          ))}
+        </div>
+      </div>
+
+      <ToastContainer />
+    </div>
+  );
+}

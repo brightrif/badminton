@@ -1,0 +1,41 @@
+import json
+from channels.generic.websocket import AsyncWebsocketConsumer
+from .models import Match
+
+class MatchConsumer(AsyncWebsocketConsumer):
+    async def connect(self):
+        self.match_id = self.scope['url_route']['kwargs']['match_id']
+        self.group_name = f'match_{self.match_id}'
+        await self.channel_layer.group_add(self.group_name, self.channel_name)
+        await self.accept()
+
+    async def disconnect(self, close_code):
+        await self.channel_layer.group_discard(self.group_name, self.channel_name)
+
+    async def receive(self, text_data):
+        # Handle score updates from admin (e.g., scorekeeper)
+        data = json.loads(text_data)
+        match = Match.objects.get(id=self.match_id)
+        # Update match score (add validation and permissions)
+        match.game3_player1 = data.get('game3_player1', match.game3_player1)
+        match.game3_player2 = data.get('game3_player2', match.game3_player2)
+        match.server_id = data.get('server_id', match.server_id)
+        match.save()
+
+        # Broadcast updated score
+        await self.channel_layer.group_send(
+            self.group_name,
+            {
+                'type': 'score_update',
+                'score': {
+                    'game3_player1': match.game3_player1,
+                    'game3_player2': match.game3_player2,
+                    'server_id': match.server_id,
+                },
+            }
+        )
+
+    async def score_update(self, event):
+        await self.send(text_data=json.dumps({
+            'score': event['score'],
+        }))

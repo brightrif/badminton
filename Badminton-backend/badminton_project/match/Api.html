@@ -1,0 +1,163 @@
+# Badminton API Endpoints Reference
+
+## Base URL Structure
+All API endpoints are prefixed with `/api/`
+
+## Countries
+- `GET /api/countries/` - List all countries
+- `POST /api/countries/` - Create a new country
+- `GET /api/countries/{id}/` - Get country details
+- `PUT /api/countries/{id}/` - Update country
+- `PATCH /api/countries/{id}/` - Partial update country
+- `DELETE /api/countries/{id}/` - Delete country
+
+### Custom Country Endpoints
+- `GET /api/countries/{id}/players/` - Get all players from country
+- `GET /api/countries/{id}/venues/` - Get all venues from country
+
+## Venues  
+- `GET /api/venues/` - List all venues
+- `POST /api/venues/` - Create a new venue
+- `GET /api/venues/{id}/` - Get venue details
+- `PUT /api/venues/{id}/` - Update venue
+- `PATCH /api/venues/{id}/` - Partial update venue
+- `DELETE /api/venues/{id}/` - Delete venue
+
+### Custom Venue Endpoints
+- `GET /api/venues/{id}/courts/` - Get all courts for venue
+- `GET /api/venues/{id}/matches/` - Get all matches for venue
+- `GET /api/venues/by_city/?city={city_name}` - Get venues by city
+
+## Courts
+- `GET /api/courts/` - List all courts
+- `POST /api/courts/` - Create a new court
+- `GET /api/courts/{id}/` - Get court details
+- `PUT /api/courts/{id}/` - Update court
+- `PATCH /api/courts/{id}/` - Partial update court
+- `DELETE /api/courts/{id}/` - Delete court
+
+### Custom Court Endpoints
+- `GET /api/courts/{id}/matches/` - Get all matches for court
+
+## Tournaments
+- `GET /api/tournaments/` - List all tournaments
+- `POST /api/tournaments/` - Create a new tournament
+- `GET /api/tournaments/{id}/` - Get tournament details
+- `PUT /api/tournaments/{id}/` - Update tournament
+- `PATCH /api/tournaments/{id}/` - Partial update tournament
+- `DELETE /api/tournaments/{id}/` - Delete tournament
+
+### Custom Tournament Endpoints
+- `GET /api/tournaments/{id}/matches/` - Get all matches for tournament
+- `GET /api/tournaments/{id}/matches/?status=Live` - Get matches by status
+- `GET /api/tournaments/{id}/live_matches/` - Get live matches
+- `GET /api/tournaments/{id}/venues/` - Get tournament venues
+- `GET /api/tournaments/current/` - Get currently running tournaments
+- `GET /api/tournaments/upcoming/` - Get upcoming tournaments
+
+## Players
+- `GET /api/players/` - List all players
+- `POST /api/players/` - Create a new player
+- `GET /api/players/{id}/` - Get player details
+- `PUT /api/players/{id}/` - Update player
+- `PATCH /api/players/{id}/` - Partial update player
+- `DELETE /api/players/{id}/` - Delete player
+
+### Custom Player Endpoints
+- `GET /api/players/{id}/matches/` - Get all matches for player
+- `GET /api/players/{id}/matches/?status=Live` - Get player matches by status
+- `GET /api/players/{id}/statistics/` - Get player statistics
+- `GET /api/players/by_country/?country_id={id}` - Get players by country
+
+## Matches
+- `GET /api/matches/` - List all matches
+- `POST /api/matches/` - Create a new match
+- `GET /api/matches/{id}/` - Get match details
+- `PUT /api/matches/{id}/` - Update match
+- `PATCH /api/matches/{id}/` - Partial update match
+- `DELETE /api/matches/{id}/` - Delete match
+
+### Custom Match Endpoints
+- `GET /api/matches/live/` - Get all live matches
+- `GET /api/matches/upcoming/` - Get upcoming matches
+- `GET /api/matches/upcoming/?date=2025-06-15` - Get upcoming matches by date
+- `GET /api/matches/today/` - Get today's matches
+- `POST /api/matches/{id}/update_score/` - Update match score
+- `POST /api/matches/{id}/start_match/` - Start a match
+- `POST /api/matches/{id}/finish_match/` - Finish a match
+
+## Sponsors
+- `GET /api/sponsors/` - List all sponsors
+- `POST /api/sponsors/` - Create a new sponsor
+- `GET /api/sponsors/{id}/` - Get sponsor details
+- `PUT /api/sponsors/{id}/` - Update sponsor
+- `PATCH /api/sponsors/{id}/` - Partial update sponsor
+- `DELETE /api/sponsors/{id}/` - Delete sponsor
+
+## Game Scores
+- `GET /api/game-scores/` - List all game scores
+- `POST /api/game-scores/` - Create a new game score
+- `GET /api/game-scores/{id}/` - Get game score details
+- `PUT /api/game-scores/{id}/` - Update game score
+- `PATCH /api/game-scores/{id}/` - Partial update game score
+- `DELETE /api/game-scores/{id}/` - Delete game score
+
+## Tournament Venues
+- `GET /api/tournament-venues/` - List all tournament-venue relationships
+- `POST /api/tournament-venues/` - Create a new tournament-venue relationship
+- `GET /api/tournament-venues/{id}/` - Get tournament-venue details
+- `PUT /api/tournament-venues/{id}/` - Update tournament-venue
+- `PATCH /api/tournament-venues/{id}/` - Partial update tournament-venue
+- `DELETE /api/tournament-venues/{id}/` - Delete tournament-venue
+
+## Filtering and Search
+
+### Common Query Parameters
+- `?search={query}` - Search across relevant fields
+- `?ordering={field}` - Order results by field (use `-field` for descending)
+- `?limit={number}` - Limit number of results
+- `?offset={number}` - Offset for pagination
+
+### Specific Filters
+- **Venues**: `?country={id}&has_parking=true&has_cafeteria=true&has_livestream=true`
+- **Courts**: `?venue={id}&court_type={type}&surface_type={type}&is_active=true`
+- **Players**: `?country={id}`
+- **Matches**: `?tournament={id}&status={status}&match_type={type}&venue={id}&court={id}`
+- **Sponsors**: `?tournament={id}`
+- **Game Scores**: `?match={id}&game_number={number}`
+- **Tournament Venues**: `?tournament={id}&venue={id}`
+
+## Authentication
+If authentication is enabled, include the token in the Authorization header:
+```
+Authorization: Token your_token_here
+```
+
+## API Documentation
+Visit `/api/docs/` for interactive API documentation (if enabled).
+
+## Example API Calls
+
+### Get Live Matches
+```bash
+curl -X GET "http://localhost:8000/api/matches/live/"
+```
+
+### Update Match Score
+```bash
+curl -X POST "http://localhost:8000/api/matches/1/update_score/" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "game_scores": [
+      {"game_number": 1, "team1_score": 21, "team2_score": 18},
+      {"game_number": 2, "team1_score": 19, "team2_score": 21}
+    ],
+    "status": "Live",
+    "current_game": 3
+  }'
+```
+
+### Search Players
+```bash
+curl -X GET "http://localhost:8000/api/players/?search=john&country=1"
+```
