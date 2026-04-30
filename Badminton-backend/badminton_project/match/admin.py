@@ -1,4 +1,5 @@
 from django.contrib import admin
+from django.utils.html import format_html
 from .models import Tournament, Player,Sponsor,Match # Import your models here
 # Register your models here.
 admin.site.site_header = "Badminton Tournament Management"

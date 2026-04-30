@@ -214,9 +214,9 @@ class MatchSerializer(serializers.ModelSerializer):
         server = data.get('server')
 
         # Ensure players exist
-        if not player1_team1 or not Player.objects.filter(id=player1_team1.id).exists():
+        if not player1_team1 or not Player.objects.filter(id=player1_team1).exists():
             raise serializers.ValidationError("player1_team1 is required and must exist.")
-        if not player1_team2 or not Player.objects.filter(id=player1_team2.id).exists():
+        if not player1_team2 or not Player.objects.filter(id=player1_team2).exists():
             raise serializers.ValidationError("player1_team2 is required and must exist.")
         
         # Validate players based on match type

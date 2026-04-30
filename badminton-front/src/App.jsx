@@ -1,158 +1,202 @@
 import React, { useState, useEffect } from "react";
-import { Dot } from "lucide-react";
+import { Dot, Monitor, RefreshCw } from "lucide-react";
 import PlayerCard from "./components/PlayerCard";
 import SponsorDisplay from "./components/SponsorDisplay";
 
-const API_BASE = "http://127.0.0.1:8000/api"; // Change if deployed
+const API_BASE = "http://127.0.0.1:8000/api";
 
 export default function App() {
   const [matchData, setMatchData] = useState(null);
   const [sponsors, setSponsors] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [isLive, setIsLive] = useState(true); // ← ONLY NEW STATE
+  const [isLive, setIsLive] = useState(true);
   const [minutesLeft, setMinutesLeft] = useState(null);
 
-  // Fetch a LIVE match + sponsors
+  // DYNAMIC COURTS STATE
+  const [availableCourts, setAvailableCourts] = useState([]); // List of all courts from API
+  const [selectedCourtId, setSelectedCourtId] = useState(null); // The specific court this screen is showing (by ID)
+  const [courtsLoading, setCourtsLoading] = useState(true);
+
+  // 1. Fetch the list of Courts once on mount
   useEffect(() => {
+    const fetchCourts = async () => {
+      try {
+        const res = await fetch(`${API_BASE}/courts/`);
+        if (!res.ok) throw new Error("Could not fetch courts list");
+
+        const data = await res.json();
+        const courtsArray = data.results || data || [];
+
+        setAvailableCourts(courtsArray);
+
+        // Default to the first court if none selected yet
+        if (courtsArray.length > 0 && !selectedCourtId) {
+          setSelectedCourtId(courtsArray[0].id);
+        }
+      } catch (err) {
+        console.error("Error fetching courts:", err);
+        // Fallback for demo/testing if API fails
+        const fallbackCourts = [
+          { id: 1, name: "Court 1" },
+          { id: 2, name: "Court 2" },
+        ];
+        setAvailableCourts(fallbackCourts);
+        if (!selectedCourtId) setSelectedCourtId(1);
+      } finally {
+        setCourtsLoading(false);
+      }
+    };
+    fetchCourts();
+  }, []);
+
+  // 2. Fetch Matches & Filter by Selected Court NAME
+  useEffect(() => {
+    if (!selectedCourtId || availableCourts.length === 0) return;
+
+    // Get the name of the selected court using the ID
+    const selectedCourt = availableCourts.find((c) => c.id === selectedCourtId);
+    const selectedCourtName = selectedCourt ? selectedCourt.name : null;
+
+    if (!selectedCourtName) return;
+
     const fetchLiveMatch = async () => {
       try {
-        // 1. Get any Live match
-        const matchRes = await fetch(`${API_BASE}/matches/live/`, {
-          headers: {
-            Accept: "application/json",
-          },
-        });
-        // 2. Parse the data immediately
+        setLoading(true);
+
+        // A. Get Live matches
+        const matchRes = await fetch(`${API_BASE}/matches/live/`);
         const data = await matchRes.json();
         const liveMatchesArray = data.results || data || [];
 
-        let liveMatch;
+        // FILTER: Find the match using the court_name string
+        let targetMatch = liveMatchesArray.find(
+          (m) => m.court_name === selectedCourtName
+        );
+
         let currentIsLive = true;
-        if (!matchRes.ok || liveMatchesArray.length === 0) {
-          // No live match → get the next upcoming one
+
+        if (targetMatch) {
+          console.log(`Found Live match for Court: ${selectedCourtName}`);
+        } else {
+          // B. No live match for this court? Check upcoming.
+          console.log(
+            `No live match for Court ${selectedCourtName}, checking upcoming...`
+          );
           currentIsLive = false;
+
           const upcomingRes = await fetch(`${API_BASE}/matches/upcoming`);
           const upcomingData = await upcomingRes.json();
           const upcomingArray = upcomingData.results || upcomingData || [];
 
-          if (upcomingArray.length === 0) {
+          // FILTER: Find upcoming match using the court_name string
+          targetMatch = upcomingArray.find(
+            (m) => m.court_name === selectedCourtName
+          );
+
+          if (targetMatch) {
+            setIsLive(false);
+          } else {
+            // C. No matches at all for this court
             setMatchData(null);
             setLoading(false);
             return;
           }
-
-          liveMatch = upcomingArray[0];
-          setIsLive(false); // ← NEW flag
-        } else {
-          //liveMatch = await matchRes.json();
-          liveMatch = liveMatchesArray[0];
         }
-        setIsLive(currentIsLive); // ← NEW flag
-        //const matchRes = await fetch(`${API_BASE}/matches/live`);
-        //if (!matchRes.ok) throw new Error("Network error");
 
-        //const data = await matchRes.json();
+        setIsLive(currentIsLive);
 
-        // DRF can return: {results: [...]}, or direct array if pagination is off
-        //const matchesArray = data.results || data || [];
-
-        //if (matchesArray.length === 0)
-        // throw new Error("No live match right now");
-        //const liveMatch = matchesArray[0]; // ← this will always work now
-
-        // 2. Get sponsors for this tournament
+        // 3. Get sponsors for this match's tournament
         const sponsorsRes = await fetch(
-          `${API_BASE}/sponsors/?tournament=${liveMatch.tournament}`
+          `${API_BASE}/sponsors/?tournament=${targetMatch.tournament}`
         );
         const sponsorsJson = await sponsorsRes.json();
         const tournamentSponsors = sponsorsJson.results || sponsorsJson;
-        // Transform API data → your frontend format
+
+        // Transform Data (Ensures Doubles logic is correct)
         const transformed = {
-          id: liveMatch.id,
-          tournament: liveMatch.tournament_name,
-          match_type: liveMatch.match_type.replace("_", " ") + " - Final", // or remove "Final"
+          id: targetMatch.id,
+          tournament: targetMatch.tournament_name,
+          match_type: targetMatch.match_type.replace("_", " ") + " - Final",
           player1: {
-            id: liveMatch.player1_team1_detail.id,
-            name: liveMatch.player1_team1_detail.name,
-            country: liveMatch.player1_team1_detail.country_name || "Unknown",
-            country_code: liveMatch.player1_team1_detail.country_code || "",
+            id: targetMatch.player1_team1_detail.id,
+            name: targetMatch.player1_team1_detail.name,
+            country: targetMatch.player1_team1_detail.country_name || "Unknown",
+            country_code: targetMatch.player1_team1_detail.country_code || "",
             photo_url:
-              liveMatch.player1_team1_detail.photo_url ||
+              targetMatch.player1_team1_detail.photo_url ||
               "https://placehold.co/120x120/888/fff?text=" +
-                liveMatch.player1_team1_detail.name.charAt(0),
+                targetMatch.player1_team1_detail.name.charAt(0),
           },
-          // NEW: Secondary Player for Team 1 (only if match_type is DOUBLES)
           player1_secondary:
-            liveMatch.match_type.toLowerCase().includes("double") &&
-            liveMatch.player2_team1_detail
+            targetMatch.match_type.toLowerCase().includes("double") &&
+            targetMatch.player2_team1_detail
               ? {
-                  id: liveMatch.player2_team1_detail.id,
-                  name: liveMatch.player2_team1_detail.name,
+                  id: targetMatch.player2_team1_detail.id,
+                  name: targetMatch.player2_team1_detail.name,
                   country:
-                    liveMatch.player2_team1_detail.country_name || "Unknown",
+                    targetMatch.player2_team1_detail.country_name || "Unknown",
                   country_code:
-                    liveMatch.player2_team1_detail.country_code || "",
+                    targetMatch.player2_team1_detail.country_code || "",
                   photo_url:
-                    liveMatch.player2_team1_detail.photo_url ||
+                    targetMatch.player2_team1_detail.photo_url ||
                     "https://placehold.co/120x120/888/fff?text=" +
-                      liveMatch.player2_team1_detail.name.charAt(0),
+                      targetMatch.player2_team1_detail.name.charAt(0),
                 }
               : null,
           player2: {
-            id: liveMatch.player1_team2_detail.id,
-            name: liveMatch.player1_team2_detail.name,
-            country: liveMatch.player1_team2_detail.country_name || "Unknown",
-            country_code: liveMatch.player1_team2_detail.country_code || "",
+            id: targetMatch.player1_team2_detail.id,
+            name: targetMatch.player1_team2_detail.name,
+            country: targetMatch.player1_team2_detail.country_name || "Unknown",
+            country_code: targetMatch.player1_team2_detail.country_code || "",
             photo_url:
-              liveMatch.player1_team2_detail.photo_url ||
+              targetMatch.player1_team2_detail.photo_url ||
               "https://placehold.co/120x120/888/fff?text=" +
-                liveMatch.player1_team2_detail.name.charAt(0),
+                targetMatch.player1_team2_detail.name.charAt(0),
           },
-          // NEW: Secondary Player for Team 2 (only if match_type is DOUBLES)
           player2_secondary:
-            liveMatch.match_type.toLowerCase().includes("double") &&
-            liveMatch.player2_team2_detail
+            targetMatch.match_type.toLowerCase().includes("double") &&
+            targetMatch.player2_team2_detail
               ? {
-                  id: liveMatch.player2_team2_detail.id,
-                  name: liveMatch.player2_team2_detail.name,
+                  id: targetMatch.player2_team2_detail.id,
+                  name: targetMatch.player2_team2_detail.name,
                   country:
-                    liveMatch.player2_team2_detail.country_name || "Unknown",
+                    targetMatch.player2_team2_detail.country_name || "Unknown",
                   country_code:
-                    liveMatch.player2_team2_detail.country_code || "",
+                    targetMatch.player2_team2_detail.country_code || "",
                   photo_url:
-                    liveMatch.player2_team2_detail.photo_url ||
+                    targetMatch.player2_team2_detail.photo_url ||
                     "https://placehold.co/120x120/888/fff?text=" +
-                      liveMatch.player2_team2_detail.name.charAt(0),
+                      targetMatch.player2_team2_detail.name.charAt(0),
                 }
               : null,
           score: {
             game1_player1:
-              liveMatch.game_scores.find((g) => g.game_number === 1)
+              targetMatch.game_scores.find((g) => g.game_number === 1)
                 ?.team1_score || 0,
             game1_player2:
-              liveMatch.game_scores.find((g) => g.game_number === 1)
+              targetMatch.game_scores.find((g) => g.game_number === 1)
                 ?.team2_score || 0,
             game2_player1:
-              liveMatch.game_scores.find((g) => g.game_number === 2)
+              targetMatch.game_scores.find((g) => g.game_number === 2)
                 ?.team1_score || 0,
             game2_player2:
-              liveMatch.game_scores.find((g) => g.game_number === 2)
+              targetMatch.game_scores.find((g) => g.game_number === 2)
                 ?.team2_score || 0,
             game3_player1:
-              liveMatch.game_scores.find((g) => g.game_number === 3)
+              targetMatch.game_scores.find((g) => g.game_number === 3)
                 ?.team1_score || 0,
             game3_player2:
-              liveMatch.game_scores.find((g) => g.game_number === 3)
+              targetMatch.game_scores.find((g) => g.game_number === 3)
                 ?.team2_score || 0,
-            current_game: liveMatch.current_game,
-            player1_sets: liveMatch.team1_sets,
-            player2_sets: liveMatch.team2_sets,
+            current_game: targetMatch.current_game,
+            player1_sets: targetMatch.team1_sets,
+            player2_sets: targetMatch.team2_sets,
           },
-          scheduled_time: liveMatch.scheduled_time,
-          status: liveMatch.status,
+          scheduled_time: targetMatch.scheduled_time,
+          status: targetMatch.status,
           server_id:
-            liveMatch.server_detail?.id || liveMatch.player1_team1_detail.id,
+            targetMatch.server_detail?.id ||
+            targetMatch.player1_team1_detail.id,
         };
 
         setMatchData(transformed);
@@ -162,105 +206,125 @@ export default function App() {
             logo_url: s.logo_url,
           }))
         );
-
-        // Calculate minutes left if upcoming
-
-        // End of minutes left calc
       } catch (err) {
         console.error(err);
-        setError(err.message);
-        // Keep dummy data as fallback so UI doesn't break
-        setMatchData({
-          id: 101,
-          tournament: "No Live Match Found",
-          match_type: "Waiting for match...",
-          player1: {
-            id: 1,
-            name: "Player 1",
-            country: "TBD",
-            country_code: "??",
-            photo_url: "https://placehold.co/120x120/666/fff?text=?",
-          },
-          player2: {
-            id: 2,
-            name: "Player 2",
-            country: "TBD",
-            country_code: "??",
-            photo_url: "https://placehold.co/120x120/666/fff?text=?",
-          },
-          score: {
-            game1_player1: 0,
-            game1_player2: 0,
-            game2_player1: 0,
-            game2_player2: 0,
-            game3_player1: 0,
-            game3_player2: 0,
-            current_game: 1,
-            player1_sets: 0,
-            player2_sets: 0,
-          },
-          status: "Upcoming",
-          server_id: 1,
-        });
+        setMatchData(null);
       } finally {
         setLoading(false);
       }
     };
 
     fetchLiveMatch();
-    const interval = setInterval(fetchLiveMatch, 8000); // Auto-refresh every 8 seconds
+    const interval = setInterval(fetchLiveMatch, 8000); // Poll every 8 seconds
     return () => clearInterval(interval);
-  }, []);
+  }, [selectedCourtId, availableCourts]); // Re-run when court selection changes
 
-  // Dedicated useEffect for real-time countdown
+  // Countdown Timer
   useEffect(() => {
     let timer;
-
-    // Only run if we have data and it's an upcoming match
     if (matchData && !isLive && matchData.scheduled_time) {
       const targetTime = new Date(matchData.scheduled_time).getTime();
-
       const calculateTimeLeft = () => {
         const now = Date.now();
-        const diff = targetTime - now; // Time difference in ms
-
+        const diff = targetTime - now;
         if (diff <= 0) {
-          setMinutesLeft({ minutes: 0, seconds: 0 }); // Set to 00:00
-          clearInterval(timer); // Stop the timer
-          // The main 8-second poll will check if the match status changed to 'Live'
+          setMinutesLeft({ minutes: 0, seconds: 0 });
+          clearInterval(timer);
           return;
         }
-
-        // Convert ms to minutes and seconds
-        const totalSeconds = Math.floor(diff / 1000);
-        const minutes = Math.floor(totalSeconds / 60);
-        const seconds = totalSeconds % 60;
-
-        setMinutesLeft({ minutes, seconds });
+        setMinutesLeft({
+          minutes: Math.floor(Math.floor(diff / 1000) / 60),
+          seconds: Math.floor(diff / 1000) % 60,
+        });
       };
-
-      calculateTimeLeft(); // Initial calculation
-      timer = setInterval(calculateTimeLeft, 1000); // Update every second
+      calculateTimeLeft();
+      timer = setInterval(calculateTimeLeft, 1000);
     } else {
-      // Clear the countdown if match is live or scheduled_time is missing
       setMinutesLeft(null);
     }
-
-    // Cleanup function: clears the interval when component unmounts or dependencies change
     return () => clearInterval(timer);
-  }, [matchData, isLive]); // Runs when match data or live status changes
-  // Dedicated useEffect for real-time countdown ends here
+  }, [matchData, isLive]);
 
-  if (loading) {
+  // -- RENDER HELPERS: Court Selector Component --
+  const CourtSelector = () => (
+    <div className="absolute top-4 left-4 z-50 bg-black/30 hover:bg-black/50 transition-colors backdrop-blur-md py-1 px-3 rounded-full border border-white/10 flex items-center gap-2 group shadow-xl">
+      <Monitor className="w-4 h-4 text-yellow-400 group-hover:animate-pulse" />
+      <select
+        value={selectedCourtId || ""}
+        onChange={(e) => setSelectedCourtId(Number(e.target.value))}
+        className="bg-transparent text-sm text-gray-200 font-bold outline-none cursor-pointer appearance-none pr-4 uppercase tracking-wide"
+        disabled={courtsLoading || availableCourts.length === 0}
+      >
+        {courtsLoading ? (
+          <option className="text-black">Loading Courts...</option>
+        ) : (
+          availableCourts.map((court) => (
+            <option key={court.id} value={court.id} className="text-black">
+              {court.name}
+            </option>
+          ))
+        )}
+      </select>
+    </div>
+  );
+
+  // -- RENDER: Initial Court Selection Screen (if no default is set) --
+  if (!selectedCourtId && !courtsLoading) {
     return (
-      <div className="h-screen flex items-center justify-center bg-gradient-to-br from-blue-900 to-indigo-900">
-        <div className="text-white text-3xl">Loading Live Match...</div>
+      <div className="h-screen flex flex-col items-center justify-center bg-blue-900 text-white">
+        <h1 className="text-2xl mb-4">Select a Court to Display</h1>
+        <div className="bg-white text-black p-4 rounded shadow-2xl">
+          {availableCourts.map((c) => (
+            <button
+              key={c.id}
+              onClick={() => setSelectedCourtId(c.id)}
+              className="block w-full text-left py-2 px-4 hover:bg-gray-200 border-b last:border-b-0 font-semibold"
+            >
+              {c.name}
+            </button>
+          ))}
+        </div>
       </div>
     );
   }
 
-  if (!matchData) return null;
+  // -- RENDER: No Match/Idle Screen --
+  if (!loading && !matchData) {
+    const currentCourtName =
+      availableCourts.find((c) => c.id === selectedCourtId)?.name ||
+      "Selected Court";
+    return (
+      <div className="h-screen flex flex-col items-center justify-center bg-gradient-to-br from-blue-900 to-indigo-900 text-white relative">
+        <CourtSelector />
+        <div className="text-center p-8 bg-blue-800/50 rounded-2xl border border-white/10 backdrop-blur-sm">
+          <RefreshCw className="w-16 h-16 text-blue-400 mx-auto mb-4 animate-spin-slow" />
+          <div className="text-3xl font-bold opacity-90">Court Idle</div>
+          <p className="text-gray-300 mt-2 text-lg">
+            Waiting for matches on{" "}
+            <span className="text-yellow-400 font-bold">
+              {currentCourtName}
+            </span>
+            ...
+          </p>
+        </div>
+      </div>
+    );
+  }
 
+  // -- RENDER: Loading Spinner --
+  if (loading && !matchData) {
+    return (
+      <div className="h-screen flex items-center justify-center bg-gradient-to-br from-blue-900 to-indigo-900">
+        <div className="text-white text-3xl animate-pulse">
+          Loading Match...
+        </div>
+      </div>
+    );
+  }
+
+  // -- RENDER: Main Scoreboard --
+
+  // Destructure Data
   const {
     player1,
     player2,
@@ -273,20 +337,18 @@ export default function App() {
     player2_secondary,
   } = matchData;
 
-  // Check if Player 1 or their partner is serving (safer check for doubles)
-  //const isPlayer1Serving = server_id === player1.id;
   const isPlayer1Serving =
     server_id === player1.id || server_id === player1_secondary?.id;
-  // New flag to simplify doubles checks in JSX
-  //const isDoubles = match_type.toLowerCase().includes("double");
-
-  const getGameScore = (gameNum, playerNum) => {
-    const key = `game${gameNum}_player${playerNum}`;
-    return score[key] !== undefined ? score[key] : "-";
-  };
+  const getGameScore = (g, p) =>
+    score[`game${g}_player${p}`] !== undefined
+      ? score[`game${g}_player${p}`]
+      : "-";
 
   return (
-    <div className="h-screen overflow-hidden bg-gradient-to-br from-blue-900 to-indigo-900 text-white font-sans p-4 flex flex-col items-center gap-4">
+    <div className="h-screen overflow-hidden bg-gradient-to-br from-blue-900 to-indigo-900 text-white font-sans p-4 flex flex-col items-center gap-4 relative">
+      {/* Dynamic Court Selector */}
+      <CourtSelector />
+
       {/* Tournament Header */}
       <div className="w-full max-w-5xl text-center flex-shrink-0">
         <h1 className="text-3xl sm:text-4xl font-bold text-yellow-400 mb-2 rounded-lg py-2 px-4 bg-blue-800 shadow-lg">
@@ -310,6 +372,7 @@ export default function App() {
             secondaryPlayer={player1_secondary}
             isServing={isPlayer1Serving}
           />
+
           <div className="flex flex-col items-center justify-center text-5xl font-extrabold text-yellow-400 mx-4">
             <span className="text-2xl font-bold text-gray-300">VS</span>
             <div className="flex items-center mt-2">
@@ -325,6 +388,7 @@ export default function App() {
               Game {score.current_game}
             </span>
           </div>
+
           <PlayerCard
             player={player2}
             secondaryPlayer={player2_secondary}
@@ -335,7 +399,6 @@ export default function App() {
         {/* Set Scores Table */}
         <div className="w-full flex justify-center mt-6">
           {isLive ? (
-            /* 1. SHOW THIS IF LIVE */
             <div className="bg-blue-700 rounded-xl p-3 shadow-inner w-full max-w-lg">
               <h3 className="text-lg font-semibold text-gray-200 text-center mb-2">
                 Set Scores
@@ -383,29 +446,22 @@ export default function App() {
               </div>
             </div>
           ) : (
-            /* 2. SHOW THIS IF UPCOMING */
             <div className="bg-blue-800/50 border border-blue-400/30 rounded-xl p-8 shadow-lg text-center w-full max-w-lg backdrop-blur-sm">
               <h3 className="text-2xl sm:text-3xl font-bold text-yellow-400 animate-pulse mb-3">
                 Match Starts Shortly
               </h3>
-              {/* Countdown message */}
-
-              {/* Conditional Countdown Display */}
               {minutesLeft &&
               (minutesLeft.minutes > 0 || minutesLeft.seconds > 0) ? (
                 <p className="text-blue-200 text-xl mt-4">
-                  The Match will start in:
+                  Match starts in:{" "}
                   <span className="block text-4xl sm:text-5xl font-extrabold text-yellow-300 mt-2 tracking-widest animate-pulse">
                     {String(minutesLeft.minutes).padStart(2, "0")} :{" "}
                     {String(minutesLeft.seconds).padStart(2, "0")}
                   </span>
-                  <span className="text-sm font-semibold text-gray-400 block mt-1">
-                    Minutes : Seconds
-                  </span>
                 </p>
               ) : (
                 <p className="text-blue-200 text-lg">
-                  The match is due to start now. Checking for live updates...
+                  Checking for live updates...
                 </p>
               )}
               <div className="mt-4 text-sm text-gray-400 bg-blue-900/40 py-2 px-4 rounded-full inline-block">
@@ -420,7 +476,6 @@ export default function App() {
             </div>
           )}
         </div>
-        {/*end of Main Scoreboard */}
       </div>
 
       {/* Sponsors */}
@@ -430,9 +485,7 @@ export default function App() {
         </h3>
         <div className="flex flex-wrap justify-center items-center gap-6">
           {sponsors.length > 0 ? (
-            sponsors.map((sponsor, i) => (
-              <SponsorDisplay key={i} sponsor={sponsor} />
-            ))
+            sponsors.map((s, i) => <SponsorDisplay key={i} sponsor={s} />)
           ) : (
             <p className="text-gray-400">Loading sponsors...</p>
           )}
