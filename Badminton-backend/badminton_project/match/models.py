@@ -232,7 +232,7 @@ class Match(models.Model):
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-
+    
     # ── Score helpers ─────────────────────────────────────────────────────────
     def get_current_game_score(self):
         return self.game_scores.filter(game_number=self.current_game).first()

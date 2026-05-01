@@ -47,21 +47,21 @@ ASGI_APPLICATION = 'badminton_project.asgi.application'
 # Redis must be running on localhost:6379
 # For development you can use InMemoryChannelLayer (no Redis needed):
 #
-#   CHANNEL_LAYERS = {
-#       "default": {
-#           "BACKEND": "channels.layers.InMemoryChannelLayer"
-#       }
-#   }
+CHANNEL_LAYERS = {
+      "default": {
+          "BACKEND": "channels.layers.InMemoryChannelLayer"
+      }
+  }
 #
 # Switch to Redis for production / multi-process deployments:
-CHANNEL_LAYERS = {
-    "default": {
-        "BACKEND": "channels_redis.core.RedisChannelLayer",
-        "CONFIG": {
-            "hosts": [("127.0.0.1", 6379)],
-        },
-    },
-}
+# CHANNEL_LAYERS = {
+#     "default": {
+#         "BACKEND": "channels_redis.core.RedisChannelLayer",
+#         "CONFIG": {
+#             "hosts": [("127.0.0.1", 6379)],
+#         },
+#     },
+# }
 
 # ─── REST FRAMEWORK ──────────────────────────────────────────────────────────
 REST_FRAMEWORK = {
