@@ -10,6 +10,8 @@ from rest_framework.permissions import AllowAny
 from django_filters.rest_framework import DjangoFilterBackend
 from django.db.models import Q
 from django.utils import timezone
+from rest_framework_simplejwt.authentication import JWTAuthentication
+from rest_framework.permissions import IsAuthenticated
 
 from .models import (
     Country, Tournament, Player, Sponsor, Match, GameScore, Venue,
@@ -39,6 +41,24 @@ TOKEN_TTL_SECONDS = 60 * 60 * 12   # 12 hours — covers a full match day
 #     sig = hmac.new(secret.encode(), payload.encode(), hashlib.sha256).hexdigest()
 #     return f"{payload}:{sig}"
 
+@action(detail=True, methods=['post'], url_path='umpire_token',
+        authentication_classes=[JWTAuthentication],
+        permission_classes=[IsAuthenticated])
+def umpire_token(self, request, pk=None):
+    """
+    POST /api/matches/<id>/umpire_token/
+    Header: Authorization: Bearer <jwt>
+
+    For umpires who log in with username/password instead of PIN.
+    Issues the same HMAC token so the WS consumer needs no changes.
+    """
+    match = self.get_object()
+    token = make_token(match.id)
+    return Response({
+        'token': token,
+        'match_id': match.id,
+        'expires_in_seconds': TOKEN_TTL_SECONDS,
+    })
 
 def verify_umpire_token(match_id: int, token: str) -> bool:
     """
