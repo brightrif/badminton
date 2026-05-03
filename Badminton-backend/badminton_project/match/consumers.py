@@ -1,54 +1,9 @@
-"""
-match/consumers.py
-
-WebSocket consumer for real-time match scoring.
-
-Connection URL:
-    ws://host/ws/match/<match_id>/?token=<umpire_token>
-
-All clients (big screen viewers + umpire) connect here.
-Only the umpire — identified by a valid token — may send score commands.
-Everyone receives broadcasts.
-
-Message protocol (JSON):
-────────────────────────────────────────────────────────────────────────────
-
-  CLIENT → SERVER (umpire only)
-  ──────────────────────────────
-  { "action": "point",  "team": 1 }          Add point for team 1
-  { "action": "point",  "team": 2 }          Add point for team 2
-  { "action": "undo",   "team": 1 }          Undo last point for team 1
-  { "action": "undo",   "team": 2 }          Undo last point for team 2
-  { "action": "set_server", "player_id": 3 } Change serving player
-  { "action": "start_match" }                Transition Upcoming → Live
-  { "action": "end_match" }                  Transition Live → Completed
-
-  SERVER → ALL CLIENTS (broadcast)
-  ──────────────────────────────────
-  All broadcasts include the full updated score state so any client
-  can re-render from a single message without needing extra fetches.
-
-  {
-    "type": "score_update",          # always present
-    "action": "point" | "undo" | "server_change" | "status_change",
-    "match_id": 1,
-    "status": "Live",
-    "current_game": 2,
-    "team1_sets": 1,
-    "team2_sets": 0,
-    "game_number": 2,
-    "team1_score": 5,
-    "team2_score": 3,
-    "server_id": 4,                  # null if not set
-    "game_won": false,
-    "match_won": false,
-    "winner": null,                  # 1 or 2 if match_won
-    "error": null                    # error string if something went wrong
-  }
-
-────────────────────────────────────────────────────────────────────────────
-"""
-
+# match/consumers.py
+# Change from previous version:
+#   - imports verify_token from token_auth (not views)
+#   - added detailed debug logging in connect() so the exact
+#     failure reason is visible in the Daphne terminal
+print(">>> consumers.py LOADED <<<")
 import json
 import logging
 
@@ -56,42 +11,52 @@ from channels.generic.websocket import AsyncWebsocketConsumer
 from channels.db import database_sync_to_async
 
 from .models import Match, GameScore
-from .views import verify_umpire_token
+from .token_auth import verify_token   # ← changed import
 
 logger = logging.getLogger(__name__)
 
 
 class MatchConsumer(AsyncWebsocketConsumer):
 
-    # ── Connection lifecycle ──────────────────────────────────────────────────
-
     async def connect(self):
-        self.match_id = int(self.scope['url_route']['kwargs']['match_id'])
+        self.match_id   = int(self.scope['url_route']['kwargs']['match_id'])
         self.group_name = f'match_{self.match_id}'
-        self.is_umpire = False
+        self.is_umpire  = False
 
-        # Check for umpire token in query string
-        query_string = self.scope.get('query_string', b'').decode()
+        # ── Token check ───────────────────────────────────────────────────────
+        raw_qs       = self.scope.get('query_string', b'')
+        query_string = raw_qs.decode('utf-8') if isinstance(raw_qs, bytes) else raw_qs
+
+        logger.debug("[WS CONNECT] Match=%s | Query: %s", self.match_id, query_string)
+        print(f"[WS CONNECT] Match={self.match_id} | Query: {query_string}")
+
         token = self._parse_token(query_string)
-        if token and verify_umpire_token(self.match_id, token):
-            self.is_umpire = True
 
-        # Join the match channel group (all clients, umpire or viewer)
+        if token:
+            print(f"[WS] Token found, verifying for match_id={self.match_id}…")
+            valid = verify_token(self.match_id, token)    # ← uses token_auth now
+            print(f"[WS] Token validation result: {valid}")
+            if valid:
+                self.is_umpire = True
+        else:
+            print("[WS] No token — connecting as viewer")
+
+        print(f"[WS] Connection accepted - Umpire: {self.is_umpire}")
+
         await self.channel_layer.group_add(self.group_name, self.channel_name)
         await self.accept()
 
-        # Send current state immediately on connect so the client is in sync
         state = await self._get_match_state()
         if state:
             await self.send(text_data=json.dumps({
                 **state,
-                'type': 'score_update',
-                'action': 'init',
+                'type':      'score_update',
+                'action':    'init',
                 'is_umpire': self.is_umpire,
             }))
         else:
             await self.send(text_data=json.dumps({
-                'type': 'error',
+                'type':  'error',
                 'error': f'Match {self.match_id} not found.',
             }))
             await self.close()
@@ -99,9 +64,12 @@ class MatchConsumer(AsyncWebsocketConsumer):
     async def disconnect(self, close_code):
         await self.channel_layer.group_discard(self.group_name, self.channel_name)
 
-    # ── Incoming messages (umpire only) ───────────────────────────────────────
+    # ── Incoming messages ─────────────────────────────────────────────────────
 
     async def receive(self, text_data):
+        print(f"[consumer] receive raw: {text_data}")
+        print(f"[consumer] is_umpire: {self.is_umpire}")
+
         try:
             data = json.loads(text_data)
         except json.JSONDecodeError:
@@ -109,10 +77,12 @@ class MatchConsumer(AsyncWebsocketConsumer):
             return
 
         if not self.is_umpire:
+            print("[consumer] REJECTED — not umpire")
             await self._send_error("Unauthorised. Valid umpire token required.")
             return
 
         action = data.get('action')
+        print(f"[consumer] action: {action}")
 
         if action == 'point':
             await self._handle_point(data)
@@ -138,6 +108,7 @@ class MatchConsumer(AsyncWebsocketConsumer):
             result = await self._apply_point(team)
             await self._broadcast(result)
         except Exception as e:
+            print(f"[consumer] _handle_point ERROR: {e}")
             await self._send_error(str(e))
 
     async def _handle_undo(self, data):
@@ -149,6 +120,7 @@ class MatchConsumer(AsyncWebsocketConsumer):
             result = await self._undo_point(team)
             await self._broadcast(result)
         except Exception as e:
+            print(f"[consumer] _handle_undo ERROR: {e}")
             await self._send_error(str(e))
 
     async def _handle_set_server(self, data):
@@ -160,6 +132,7 @@ class MatchConsumer(AsyncWebsocketConsumer):
             result = await self._set_server(int(player_id))
             await self._broadcast(result)
         except Exception as e:
+            print(f"[consumer] _handle_set_server ERROR: {e}")
             await self._send_error(str(e))
 
     async def _handle_start_match(self):
@@ -167,6 +140,7 @@ class MatchConsumer(AsyncWebsocketConsumer):
             result = await self._start_match()
             await self._broadcast(result)
         except Exception as e:
+            print(f"[consumer] _handle_start_match ERROR: {e}")
             await self._send_error(str(e))
 
     async def _handle_end_match(self):
@@ -174,30 +148,30 @@ class MatchConsumer(AsyncWebsocketConsumer):
             result = await self._end_match()
             await self._broadcast(result)
         except Exception as e:
+            print(f"[consumer] _handle_end_match ERROR: {e}")
             await self._send_error(str(e))
 
-    # ── Database operations (run in thread pool) ──────────────────────────────
+    # ── Database operations ───────────────────────────────────────────────────
 
     @database_sync_to_async
     def _get_match_state(self):
         try:
-            match = Match.objects.prefetch_related('game_scores').get(pk=self.match_id)
+            match         = Match.objects.prefetch_related('game_scores').get(pk=self.match_id)
             current_score = match.get_current_game_score()
             return {
-                'match_id': match.id,
-                'status': match.status,
+                'match_id':     match.id,
+                'status':       match.status,
                 'current_game': match.current_game,
-                'team1_sets': match.team1_sets,
-                'team2_sets': match.team2_sets,
-                'game_number': match.current_game,
-                'team1_score': current_score.team1_score if current_score else 0,
-                'team2_score': current_score.team2_score if current_score else 0,
-                'server_id': match.server_id,
-                'game_won': False,
-                'match_won': False,
-                'winner': None,
-                'error': None,
-                # Full game history so big screen can show all sets
+                'team1_sets':   match.team1_sets,
+                'team2_sets':   match.team2_sets,
+                'game_number':  match.current_game,
+                'team1_score':  current_score.team1_score if current_score else 0,
+                'team2_score':  current_score.team2_score if current_score else 0,
+                'server_id':    match.server_id,
+                'game_won':     False,
+                'match_won':    False,
+                'winner':       None,
+                'error':        None,
                 'game_scores': [
                     {
                         'game_number': gs.game_number,
@@ -212,75 +186,75 @@ class MatchConsumer(AsyncWebsocketConsumer):
 
     @database_sync_to_async
     def _apply_point(self, team: int) -> dict:
-        match = Match.objects.prefetch_related('game_scores').get(pk=self.match_id)
+        print(f"[consumer] _apply_point team={team} match_id={self.match_id}")
+        match  = Match.objects.prefetch_related('game_scores').get(pk=self.match_id)
+        print(f"[consumer] match status={match.status}")
         result = match.apply_point(team)
-        # Attach full game history for broadcast
+        print(f"[consumer] apply_point result={result}")
         result.update(self._build_game_scores(match))
         result['server_id'] = match.server_id
-        result['match_id'] = match.id
-        result['error'] = None
+        result['match_id']  = match.id
+        result['error']     = None
         return result
 
     @database_sync_to_async
     def _undo_point(self, team: int) -> dict:
-        match = Match.objects.prefetch_related('game_scores').get(pk=self.match_id)
+        match  = Match.objects.prefetch_related('game_scores').get(pk=self.match_id)
         result = match.undo_point(team)
         result.update(self._build_game_scores(match))
         result['server_id'] = match.server_id
-        result['match_id'] = match.id
-        result['error'] = None
+        result['match_id']  = match.id
+        result['error']     = None
         return result
 
     @database_sync_to_async
     def _set_server(self, player_id: int) -> dict:
-        match = Match.objects.get(pk=self.match_id)
+        match  = Match.objects.get(pk=self.match_id)
         result = match.set_server(player_id)
-        state = self._build_state_snapshot(match)
+        state  = self._build_state_snapshot(match)
         result.update(state)
         result['match_id'] = match.id
-        result['error'] = None
+        result['error']    = None
         return result
 
     @database_sync_to_async
     def _start_match(self) -> dict:
+        from django.core.exceptions import ValidationError
         match = Match.objects.get(pk=self.match_id)
         if match.status != 'Upcoming':
-            from django.core.exceptions import ValidationError
-            raise ValidationError("Match is not in Upcoming status.")
+            raise ValidationError("Match is not Upcoming.")
         Match.objects.filter(pk=self.match_id).update(status='Live', current_game=1)
         match.refresh_from_db()
-        # Ensure game 1 score record exists
         GameScore.objects.get_or_create(
             match=match, game_number=1,
             defaults={'team1_score': 0, 'team2_score': 0}
         )
         return {
-            'action': 'status_change',
+            'action':   'status_change',
             'match_id': match.id,
             **self._build_state_snapshot(match),
-            'error': None,
+            'error':    None,
         }
 
     @database_sync_to_async
     def _end_match(self) -> dict:
+        from django.core.exceptions import ValidationError
         match = Match.objects.get(pk=self.match_id)
         if match.status != 'Live':
-            from django.core.exceptions import ValidationError
             raise ValidationError("Match is not Live.")
         Match.objects.filter(pk=self.match_id).update(status='Completed')
         match.refresh_from_db()
         return {
-            'action': 'status_change',
+            'action':   'status_change',
             'match_id': match.id,
             **self._build_state_snapshot(match),
-            'error': None,
+            'error':    None,
         }
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 
     def _build_game_scores(self, match) -> dict:
-        """Attach full game score history to a result dict."""
-        scores = list(match.game_scores.all())
+        scores  = list(match.game_scores.all())
         current = next((s for s in scores if s.game_number == match.current_game), None)
         return {
             'game_scores': [
@@ -299,17 +273,17 @@ class MatchConsumer(AsyncWebsocketConsumer):
         match.refresh_from_db()
         current_score = match.get_current_game_score()
         return {
-            'status': match.status,
+            'status':       match.status,
             'current_game': match.current_game,
-            'team1_sets': match.team1_sets,
-            'team2_sets': match.team2_sets,
-            'game_number': match.current_game,
-            'team1_score': current_score.team1_score if current_score else 0,
-            'team2_score': current_score.team2_score if current_score else 0,
-            'server_id': match.server_id,
-            'game_won': False,
-            'match_won': False,
-            'winner': None,
+            'team1_sets':   match.team1_sets,
+            'team2_sets':   match.team2_sets,
+            'game_number':  match.current_game,
+            'team1_score':  current_score.team1_score if current_score else 0,
+            'team2_score':  current_score.team2_score if current_score else 0,
+            'server_id':    match.server_id,
+            'game_won':     False,
+            'match_won':    False,
+            'winner':       None,
             'game_scores': [
                 {
                     'game_number': gs.game_number,
@@ -321,37 +295,34 @@ class MatchConsumer(AsyncWebsocketConsumer):
         }
 
     def _parse_token(self, query_string: str) -> str | None:
-        """Extract token= from query string. e.g. '?token=abc:123:def'"""
-        for part in query_string.lstrip('?').split('&'):
-            if part.startswith('token='):
-                return part[len('token='):]
+        """Extract token= from raw query string."""
+        from urllib.parse import parse_qs, unquote
+        # parse_qs handles both encoded and plain query strings
+        try:
+            params = parse_qs(query_string)
+            values = params.get('token', [])
+            if values:
+                return values[0]   # parse_qs already decodes percent-encoding
+        except Exception:
+            pass
         return None
 
     async def _broadcast(self, payload: dict):
-        """Send payload to all clients in the match group."""
         await self.channel_layer.group_send(
             self.group_name,
             {
-                'type': 'score_update_message',   # maps to score_update_message() below
+                'type': 'score_update_message',
                 **payload,
             }
         )
 
     async def _send_error(self, message: str):
-        """Send an error only to this connection (not broadcast)."""
         await self.send(text_data=json.dumps({
-            'type': 'error',
+            'type':  'error',
             'error': message,
         }))
 
-    # ── Channel layer event handlers (receive from group) ─────────────────────
-
     async def score_update_message(self, event):
-        """
-        Called when any member of the group calls group_send with
-        type='score_update_message'. Forward to this WebSocket connection.
-        """
-        # Remove the internal 'type' key before sending to client
         payload = {k: v for k, v in event.items() if k != 'type'}
         payload['type'] = 'score_update'
         await self.send(text_data=json.dumps(payload))

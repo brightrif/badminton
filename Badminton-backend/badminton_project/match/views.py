@@ -22,7 +22,7 @@ from .serializers import (
     VenueListSerializer, TournamentVenueSerializer, CourtSerializer
 )
 
-
+from .token_auth import make_token, verify_token
 # ─── Token helpers ────────────────────────────────────────────────────────────
 # We use a simple HMAC token so we need NO extra packages.
 # Format:  <match_id>:<timestamp>:<hmac>
@@ -32,12 +32,12 @@ from .serializers import (
 TOKEN_TTL_SECONDS = 60 * 60 * 12   # 12 hours — covers a full match day
 
 
-def _make_token(match_id: int) -> str:
-    ts = int(time.time())
-    payload = f"{match_id}:{ts}"
-    secret = getattr(settings, 'SECRET_KEY', 'fallback-secret')
-    sig = hmac.new(secret.encode(), payload.encode(), hashlib.sha256).hexdigest()
-    return f"{payload}:{sig}"
+# def _make_token(match_id: int) -> str:
+#     ts = int(time.time())
+#     payload = f"{match_id}:{ts}"
+#     secret = getattr(settings, 'SECRET_KEY', 'fallback-secret')
+#     sig = hmac.new(secret.encode(), payload.encode(), hashlib.sha256).hexdigest()
+#     return f"{payload}:{sig}"
 
 
 def verify_umpire_token(match_id: int, token: str) -> bool:
@@ -346,7 +346,9 @@ class MatchViewSet(viewsets.ModelViewSet):
         return Response(MatchSerializer(match).data)
 
     # ── NEW: PIN verification ─────────────────────────────────────────────────
-    @action(detail=True, methods=['post'], url_path='verify_pin')
+    @action(detail=True, methods=['post'], url_path='verify_pin',
+            authentication_classes=[],
+            permission_classes=[AllowAny])
     def verify_pin(self, request, pk=None):
         """
         POST /api/matches/<id>/verify_pin/
@@ -372,7 +374,7 @@ class MatchViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_403_FORBIDDEN
             )
 
-        token = _make_token(match.id)
+        token = make_token(match.id)
         return Response({
             'token': token,
             'match_id': match.id,

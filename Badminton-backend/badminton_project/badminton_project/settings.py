@@ -20,7 +20,14 @@ SECRET_KEY = 'django-insecure-w0l0p(o@ychtd3uwz=2vsm1lt@*)61h$o&3yq7qsxk1(q1%5k$
 DEBUG = True
 
 # In production set this to your actual domain(s)
-ALLOWED_HOSTS = ['localhost', '127.0.0.1']
+ALLOWED_HOSTS = ['localhost', '127.0.0.1', '*']
+
+CSRF_TRUSTED_ORIGINS = [
+    'http://localhost:5173',
+    'http://127.0.0.1:5173',
+    'http://localhost:8000',
+    'http://127.0.0.1:8000',
+]
 
 # ─── APPLICATIONS ─────────────────────────────────────────────────────────────
 INSTALLED_APPS = [
