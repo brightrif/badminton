@@ -1,4 +1,4 @@
-import { useApi } from "../hooks/useApi";
+import { useDirectorApi as useApi } from "../../hooks/useDirectorApi";
 
 function StatCard({ label, value, accent, sub }) {
   return (

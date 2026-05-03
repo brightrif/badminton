@@ -1,9 +1,9 @@
 import { useState } from "react";
-import { useApi } from "../hooks/useApi";
-import { useAuth } from "../context/AuthContext";
-import Modal, { FormField, Input, Select, SubmitBtn } from "../components/Modal";
+import { useDirectorApi as useApi } from "../../hooks/useDirectorApi";
+import { useAuth } from "../../context/AuthContext";
+import Modal, { FormField, Input, Select, SubmitBtn } from "../../components/Modal";
 
-const API_BASE = "http://127.0.0.1:8000";
+
 
 function PlayerCard({ p, onEdit, onDelete }) {
   const photo = p.photo_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(p.name)}&background=1a2d00&color=c8ff00&size=80`;

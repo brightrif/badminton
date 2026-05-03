@@ -1,12 +1,4 @@
 // src/pages/UmpirePinEntry.jsx
-//
-// Fixes:
-//  1. Match selector — umpire picks their match from a list of live/upcoming matches
-//     instead of the match ID being hardcoded in the URL
-//  2. Proper error display — wrong PIN shows clear error message with shake animation
-//  3. PIN cleared on wrong attempt so umpire can retry cleanly
-//  4. Route is now /umpire (no match ID in URL) — match ID comes from the selector
-
 import { useState, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -21,36 +13,28 @@ function MatchSelector({ onSelect }) {
   useEffect(() => {
     const load = async () => {
       try {
-        // Fetch live matches first, then upcoming
         const [liveRes, upcomingRes] = await Promise.all([
           fetch(`${API_BASE}/matches/live/`),
           fetch(`${API_BASE}/matches/upcoming/`),
         ]);
-        const liveData = await liveRes.json();
-        const upcomingData = await upcomingRes.json();
-
-        const live = Array.isArray(liveData)
-          ? liveData
-          : (liveData.results ?? []);
-        const upcoming = Array.isArray(upcomingData)
-          ? upcomingData
-          : (upcomingData.results ?? []);
-
-        // Live matches first, then upcoming — deduplicated by id
+        const live = await liveRes.json();
+        const upcoming = await upcomingRes.json();
+        const liveArr = Array.isArray(live) ? live : (live.results ?? []);
+        const upcomingArr = Array.isArray(upcoming)
+          ? upcoming
+          : (upcoming.results ?? []);
         const seen = new Set();
-        const combined = [...live, ...upcoming].filter((m) => {
+        const combined = [...liveArr, ...upcomingArr].filter((m) => {
           if (seen.has(m.id)) return false;
           seen.add(m.id);
           return true;
         });
-
-        if (combined.length === 0) {
+        if (combined.length === 0)
           setError(
-            "No live or upcoming matches found.\nAsk the admin to create a match first.",
+            "No live or upcoming matches found.\nAsk the director to create a match first.",
           );
-        }
         setMatches(combined);
-      } catch (e) {
+      } catch {
         setError("Could not load matches. Is the server running?");
       } finally {
         setLoading(false);
@@ -59,16 +43,15 @@ function MatchSelector({ onSelect }) {
     load();
   }, []);
 
-  if (loading) {
+  if (loading)
     return (
       <div style={S.loadingWrap}>
         <div style={S.spinner} />
         <span style={S.loadingText}>Loading matches…</span>
       </div>
     );
-  }
 
-  if (error) {
+  if (error)
     return (
       <div style={S.errorBox}>
         {error.split("\n").map((line, i) => (
@@ -76,7 +59,6 @@ function MatchSelector({ onSelect }) {
         ))}
       </div>
     );
-  }
 
   return (
     <div style={S.matchList}>
@@ -88,16 +70,15 @@ function MatchSelector({ onSelect }) {
           .filter(Boolean)
           .join(" / ");
         const time = m.scheduled_time
-          ? new Date(m.scheduled_time).toLocaleTimeString([], {
+          ? new Date(m.scheduled_time).toLocaleTimeString("en-GB", {
               hour: "2-digit",
               minute: "2-digit",
             })
-          : "";
-
+          : null;
         return (
           <button key={m.id} style={S.matchCard} onClick={() => onSelect(m)}>
             <div style={S.matchCardTop}>
-              <span
+              <div
                 style={{
                   ...S.matchStatusDot,
                   background: m.status === "Live" ? "#22c55e" : "#f59e0b",
@@ -126,25 +107,19 @@ function MatchSelector({ onSelect }) {
   );
 }
 
-// ─── Step 2: PIN Entry ────────────────────────────────────────────────────────
-function PinEntry({ match, onBack }) {
+// ─── Step 2a: PIN Entry ───────────────────────────────────────────────────────
+function PinEntry({ match, onBack, onSwitchMode }) {
   const navigate = useNavigate();
-
   const [digits, setDigits] = useState(["", "", "", ""]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [shake, setShake] = useState(false);
-
   const inputRefs = [useRef(), useRef(), useRef(), useRef()];
 
   useEffect(() => {
-    // If already authenticated for this match, skip straight to panel
     const stored = localStorage.getItem(`umpire_token_${match.id}`);
-    if (stored) {
-      navigate(`/umpire/${match.id}/score`, { replace: true });
-    } else {
-      inputRefs[0].current?.focus();
-    }
+    if (stored) navigate(`/umpire/${match.id}/score`, { replace: true });
+    else inputRefs[0].current?.focus();
   }, [match.id]);
 
   const clearPin = () => {
@@ -152,8 +127,8 @@ function PinEntry({ match, onBack }) {
     setTimeout(() => inputRefs[0].current?.focus(), 50);
   };
 
-  const triggerShake = (message) => {
-    setError(message);
+  const triggerShake = (msg) => {
+    setError(msg);
     setShake(true);
     clearPin();
     setTimeout(() => setShake(false), 600);
@@ -164,14 +139,13 @@ function PinEntry({ match, onBack }) {
     const next = [...digits];
     next[index] = value;
     setDigits(next);
-    setError(""); // clear error as soon as user starts retyping
+    setError("");
     if (value && index < 3) inputRefs[index + 1].current?.focus();
   };
 
   const handleKeyDown = (index, e) => {
-    if (e.key === "Backspace" && !digits[index] && index > 0) {
+    if (e.key === "Backspace" && !digits[index] && index > 0)
       inputRefs[index - 1].current?.focus();
-    }
     if (e.key === "Enter") handleSubmit();
   };
 
@@ -188,44 +162,32 @@ function PinEntry({ match, onBack }) {
 
   const handleSubmit = async () => {
     const pin = digits.join("");
-
     if (pin.length < 4) {
       triggerShake("Enter all 4 digits.");
       return;
     }
-
     setLoading(true);
     setError("");
-
     try {
       const res = await fetch(`${API_BASE}/matches/${match.id}/verify_pin/`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ pin }),
       });
-
-      // Always parse the body — even on error it contains a message
       const data = await res.json();
-
       if (!res.ok) {
-        // 403 = wrong PIN, 400 = missing PIN, 404 = match not found
-        const message =
+        triggerShake(
           res.status === 403
             ? "Wrong PIN. Try again."
             : res.status === 404
               ? "Match not found."
-              : res.status === 400
-                ? "PIN is required."
-                : data.error || data.detail || `Error ${res.status}`;
-
-        triggerShake(message);
+              : data.error || data.detail || `Error ${res.status}`,
+        );
         return;
       }
-
-      // Success — store token and navigate
       localStorage.setItem(`umpire_token_${match.id}`, data.token);
       navigate(`/umpire/${match.id}/score`);
-    } catch (e) {
+    } catch {
       triggerShake("Network error. Is the server reachable?");
     } finally {
       setLoading(false);
@@ -241,23 +203,16 @@ function PinEntry({ match, onBack }) {
 
   return (
     <div style={{ width: "100%" }}>
-      {/* Match summary */}
-      <div style={S.selectedMatch}>
-        <div style={S.selectedMatchTeams}>
-          {team1 || "Team 1"}{" "}
-          <span style={{ color: "rgba(255,255,255,0.3)" }}>vs</span>{" "}
-          {team2 || "Team 2"}
-        </div>
-        <div style={S.selectedMatchMeta}>
-          Match #{match.id}
-          {match.status === "Live" && <span style={S.livePill}>LIVE</span>}
-        </div>
-        <button style={S.changeMatchBtn} onClick={onBack}>
-          ← Change match
+      <MatchSummary match={match} team1={team1} team2={team2} onBack={onBack} />
+
+      {/* Mode toggle */}
+      <div style={S.modeToggle}>
+        <button style={{ ...S.modeBtn, ...S.modeBtnActive }}>🔢 PIN</button>
+        <button style={S.modeBtn} onClick={onSwitchMode}>
+          🔑 Password
         </button>
       </div>
 
-      {/* PIN inputs */}
       <div
         style={S.digitRow}
         onPaste={handlePaste}
@@ -276,10 +231,10 @@ function PinEntry({ match, onBack }) {
             style={{
               ...S.digitInput,
               borderColor: error
-                ? "rgba(255,100,100,0.7)" // red border on error
+                ? "rgba(255,100,100,0.7)"
                 : d
-                  ? "#e8ff47" // yellow when filled
-                  : "rgba(255,255,255,0.15)", // dim when empty
+                  ? "#e8ff47"
+                  : "rgba(255,255,255,0.15)",
               color: error ? "#ff6b6b" : d ? "#e8ff47" : "#fff",
               boxShadow: error
                 ? "0 0 16px rgba(255,100,100,0.2)"
@@ -291,7 +246,6 @@ function PinEntry({ match, onBack }) {
         ))}
       </div>
 
-      {/* Error message — always in DOM so layout doesn't jump */}
       <div
         style={{
           ...S.errorMsg,
@@ -302,7 +256,6 @@ function PinEntry({ match, onBack }) {
         ⚠ {error || "placeholder"}
       </div>
 
-      {/* Submit button */}
       <button
         onClick={handleSubmit}
         disabled={loading || digits.join("").length < 4}
@@ -323,16 +276,157 @@ function PinEntry({ match, onBack }) {
   );
 }
 
+// ─── Step 2b: Password Entry ──────────────────────────────────────────────────
+function PasswordEntry({ match, onBack, onSwitchMode }) {
+  const navigate = useNavigate();
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  const team1 = [match.player1_team1_name, match.player2_team1_name]
+    .filter(Boolean)
+    .join(" / ");
+  const team2 = [match.player1_team2_name, match.player2_team2_name]
+    .filter(Boolean)
+    .join(" / ");
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    setError("");
+    try {
+      // Step 1 — get JWT
+      const tokenRes = await fetch("/api/token/", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password }),
+      });
+      if (!tokenRes.ok) {
+        setError("Invalid username or password.");
+        return;
+      }
+      const { access } = await tokenRes.json();
+
+      // Step 2 — exchange JWT for match HMAC token
+      const matchRes = await fetch(`/api/matches/${match.id}/umpire_token/`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${access}`,
+        },
+      });
+      if (!matchRes.ok) {
+        setError("Account does not have umpire access to this match.");
+        return;
+      }
+      const { token } = await matchRes.json();
+
+      // Step 3 — store and navigate (same as PIN flow)
+      localStorage.setItem(`umpire_token_${match.id}`, token);
+      navigate(`/umpire/${match.id}/score`);
+    } catch {
+      setError("Network error. Is the server reachable?");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div style={{ width: "100%" }}>
+      <MatchSummary match={match} team1={team1} team2={team2} onBack={onBack} />
+
+      {/* Mode toggle */}
+      <div style={S.modeToggle}>
+        <button style={S.modeBtn} onClick={onSwitchMode}>
+          🔢 PIN
+        </button>
+        <button style={{ ...S.modeBtn, ...S.modeBtnActive }}>
+          🔑 Password
+        </button>
+      </div>
+
+      <form onSubmit={handleSubmit} style={S.pwForm}>
+        {error && <div style={S.pwError}>⚠ {error}</div>}
+        <div style={S.pwField}>
+          <label style={S.pwLabel}>Username</label>
+          <input
+            style={S.pwInput}
+            type="text"
+            autoComplete="username"
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+            placeholder="umpire_username"
+            required
+            autoFocus
+          />
+        </div>
+        <div style={S.pwField}>
+          <label style={S.pwLabel}>Password</label>
+          <input
+            style={S.pwInput}
+            type="password"
+            autoComplete="current-password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="••••••••"
+            required
+          />
+        </div>
+        <button
+          type="submit"
+          disabled={loading}
+          style={{
+            ...S.submitBtn,
+            opacity: loading ? 0.5 : 1,
+            cursor: loading ? "not-allowed" : "pointer",
+          }}
+        >
+          {loading ? (
+            <span style={{ letterSpacing: "2px" }}>SIGNING IN…</span>
+          ) : (
+            "ENTER COURT →"
+          )}
+        </button>
+      </form>
+    </div>
+  );
+}
+
+// ─── Shared match summary bar ─────────────────────────────────────────────────
+function MatchSummary({ match, team1, team2, onBack }) {
+  return (
+    <div style={S.selectedMatch}>
+      <div style={S.selectedMatchTeams}>
+        {team1 || "Team 1"}{" "}
+        <span style={{ color: "rgba(255,255,255,0.3)" }}>vs</span>{" "}
+        {team2 || "Team 2"}
+      </div>
+      <div style={S.selectedMatchMeta}>
+        Match #{match.id}
+        {match.status === "Live" && <span style={S.livePill}>LIVE</span>}
+      </div>
+      <button style={S.changeMatchBtn} onClick={onBack}>
+        ← Change match
+      </button>
+    </div>
+  );
+}
+
 // ─── Main Component ───────────────────────────────────────────────────────────
 export default function UmpirePinEntry() {
   const [selectedMatch, setSelectedMatch] = useState(null);
+  const [mode, setMode] = useState("pin"); // "pin" | "password"
+
+  const handleSelectMatch = (match) => {
+    setMode("pin"); // reset to PIN mode on new match selection
+    setSelectedMatch(match);
+  };
 
   return (
     <div style={S.page}>
       <style>{CSS}</style>
-
       <div style={S.card}>
-        {/* Header */}
         <div style={S.iconWrap}>
           <svg viewBox="0 0 48 48" width="40" height="40" fill="none">
             <circle cx="24" cy="24" r="22" stroke="#e8ff47" strokeWidth="2" />
@@ -347,18 +441,27 @@ export default function UmpirePinEntry() {
         </div>
 
         <h1 style={S.title}>UMPIRE ACCESS</h1>
-
         <p style={S.subtitle}>
-          {selectedMatch ? "Enter your 4-digit PIN" : "Select your match"}
+          {!selectedMatch
+            ? "Select your match"
+            : mode === "pin"
+              ? "Enter your 4-digit PIN"
+              : "Sign in with password"}
         </p>
 
-        {/* Two-step flow */}
         {!selectedMatch ? (
-          <MatchSelector onSelect={setSelectedMatch} />
-        ) : (
+          <MatchSelector onSelect={handleSelectMatch} />
+        ) : mode === "pin" ? (
           <PinEntry
             match={selectedMatch}
             onBack={() => setSelectedMatch(null)}
+            onSwitchMode={() => setMode("password")}
+          />
+        ) : (
+          <PasswordEntry
+            match={selectedMatch}
+            onBack={() => setSelectedMatch(null)}
+            onSwitchMode={() => setMode("pin")}
           />
         )}
       </div>
@@ -367,45 +470,55 @@ export default function UmpirePinEntry() {
 }
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
+const CSS = `
+  @import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=DM+Sans:wght@300;400;500;600&display=swap');
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'DM Sans', sans-serif; background: #0a0a0a; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @keyframes shake {
+    0%,100% { transform: translateX(0); }
+    20%,60% { transform: translateX(-8px); }
+    40%,80% { transform: translateX(8px); }
+  }
+  .shake { animation: shake 0.4s ease; }
+`;
+
 const S = {
   page: {
-    minHeight: "100dvh",
-    background: "radial-gradient(ellipse at 50% 0%, #1a2a0a 0%, #0a0c0a 70%)",
+    minHeight: "100vh",
+    background: "linear-gradient(135deg, #0a0a0a 0%, #0f1a00 100%)",
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
-    fontFamily: "'DM Sans', sans-serif",
-    padding: "24px",
+    padding: "20px",
   },
   card: {
     background: "rgba(255,255,255,0.03)",
     border: "1px solid rgba(255,255,255,0.08)",
-    borderRadius: "20px",
-    padding: "40px 32px",
-    maxWidth: "420px",
+    borderRadius: "24px",
+    padding: "40px 36px",
     width: "100%",
+    maxWidth: "420px",
     textAlign: "center",
+    backdropFilter: "blur(20px)",
   },
-  iconWrap: {
-    marginBottom: "20px",
-    display: "flex",
-    justifyContent: "center",
-  },
+  iconWrap: { marginBottom: "20px", display: "flex", justifyContent: "center" },
   title: {
-    fontFamily: "'Bebas Neue', sans-serif",
-    fontSize: "34px",
-    letterSpacing: "4px",
+    fontFamily: "'DM Serif Display', serif",
+    fontSize: "28px",
     color: "#fff",
-    margin: "0 0 6px",
+    letterSpacing: "4px",
+    marginBottom: "8px",
   },
   subtitle: {
-    color: "rgba(255,255,255,0.4)",
-    fontSize: "14px",
-    margin: "0 0 28px",
-    letterSpacing: "0.5px",
+    fontSize: "13px",
+    color: "rgba(255,255,255,0.35)",
+    letterSpacing: "1.5px",
+    marginBottom: "28px",
+    textTransform: "uppercase",
   },
 
-  // ── Match list ──
+  // Match list
   loadingWrap: {
     display: "flex",
     flexDirection: "column",
@@ -414,10 +527,10 @@ const S = {
     padding: "24px 0",
   },
   spinner: {
-    width: "28px",
-    height: "28px",
-    border: "3px solid rgba(255,255,255,0.1)",
-    borderTop: "3px solid #e8ff47",
+    width: "24px",
+    height: "24px",
+    border: "2px solid rgba(255,255,255,0.1)",
+    borderTopColor: "#e8ff47",
     borderRadius: "50%",
     animation: "spin 0.8s linear infinite",
   },
@@ -477,21 +590,14 @@ const S = {
     color: "rgba(255,255,255,0.3)",
     marginLeft: "auto",
   },
-  matchId: {
-    fontSize: "11px",
-    color: "rgba(255,255,255,0.2)",
-  },
+  matchId: { fontSize: "11px", color: "rgba(255,255,255,0.2)" },
   matchTeams: {
     display: "flex",
     alignItems: "center",
     gap: "8px",
     flexWrap: "wrap",
   },
-  matchTeamName: {
-    fontSize: "15px",
-    fontWeight: "600",
-    color: "#fff",
-  },
+  matchTeamName: { fontSize: "15px", fontWeight: "600", color: "#fff" },
   matchVs: {
     fontSize: "10px",
     fontWeight: "700",
@@ -505,13 +611,13 @@ const S = {
     letterSpacing: "0.5px",
   },
 
-  // ── PIN entry ──
+  // Shared match summary
   selectedMatch: {
     background: "rgba(232,255,71,0.06)",
     border: "1px solid rgba(232,255,71,0.15)",
     borderRadius: "12px",
     padding: "14px 16px",
-    marginBottom: "24px",
+    marginBottom: "20px",
     textAlign: "left",
   },
   selectedMatchTeams: {
@@ -547,6 +653,32 @@ const S = {
     fontFamily: "'DM Sans', sans-serif",
     letterSpacing: "0.5px",
   },
+
+  // Mode toggle
+  modeToggle: {
+    display: "flex",
+    gap: "8px",
+    marginBottom: "24px",
+    background: "rgba(255,255,255,0.04)",
+    borderRadius: "10px",
+    padding: "4px",
+  },
+  modeBtn: {
+    flex: 1,
+    padding: "8px",
+    border: "none",
+    borderRadius: "8px",
+    background: "transparent",
+    color: "rgba(255,255,255,0.35)",
+    fontSize: "13px",
+    cursor: "pointer",
+    fontFamily: "'DM Sans', sans-serif",
+    fontWeight: 500,
+    transition: "all 0.15s",
+  },
+  modeBtnActive: { background: "rgba(232,255,71,0.12)", color: "#e8ff47" },
+
+  // PIN inputs
   digitRow: {
     display: "flex",
     gap: "12px",
@@ -558,64 +690,69 @@ const S = {
     height: "74px",
     background: "rgba(255,255,255,0.05)",
     border: "2px solid",
-    borderRadius: "12px",
-    fontSize: "34px",
-    fontFamily: "'Bebas Neue', sans-serif",
+    borderRadius: "14px",
     textAlign: "center",
-    transition: "all 0.15s ease",
-    caretColor: "#e8ff47",
-    outline: "none",
+    fontSize: "28px",
+    fontWeight: "700",
+    color: "#fff",
+    fontFamily: "'DM Sans', sans-serif",
+    transition: "border-color 0.15s, color 0.15s, box-shadow 0.15s",
   },
   errorMsg: {
-    color: "#ff6b6b",
     fontSize: "13px",
-    fontWeight: "500",
-    marginBottom: "16px",
+    color: "#ff6b6b",
+    marginBottom: "20px",
     minHeight: "20px",
-    transition: "opacity 0.2s ease, transform 0.2s ease",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: "4px",
+    transition: "opacity 0.2s, transform 0.2s",
   },
+
+  // Password form
+  pwForm: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "16px",
+    textAlign: "left",
+  },
+  pwField: { display: "flex", flexDirection: "column", gap: "6px" },
+  pwLabel: {
+    fontSize: "11px",
+    fontWeight: 600,
+    color: "rgba(255,255,255,0.4)",
+    letterSpacing: "1px",
+    textTransform: "uppercase",
+  },
+  pwInput: {
+    background: "rgba(255,255,255,0.05)",
+    border: "1px solid rgba(255,255,255,0.12)",
+    borderRadius: "10px",
+    padding: "12px 14px",
+    color: "#fff",
+    fontSize: "14px",
+    fontFamily: "'DM Sans', sans-serif",
+  },
+  pwError: {
+    background: "rgba(255,60,60,0.08)",
+    border: "1px solid rgba(255,60,60,0.2)",
+    borderRadius: "8px",
+    padding: "10px 14px",
+    color: "#ff8080",
+    fontSize: "13px",
+  },
+
+  // Submit
   submitBtn: {
     width: "100%",
-    padding: "18px",
-    background: "#e8ff47",
-    color: "#0a0c0a",
+    padding: "16px",
+    background: "linear-gradient(135deg, #e8ff47, #c8ff00)",
     border: "none",
     borderRadius: "12px",
-    fontFamily: "'Bebas Neue', sans-serif",
-    fontSize: "18px",
+    color: "#0a0a0a",
+    fontSize: "14px",
+    fontWeight: "700",
     letterSpacing: "2px",
-    transition: "transform 0.1s ease, opacity 0.2s ease",
-    marginBottom: "8px",
+    cursor: "pointer",
+    fontFamily: "'DM Sans', sans-serif",
+    marginTop: "8px",
+    transition: "opacity 0.2s",
   },
 };
-
-const CSS = `
-  @import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@400;500;600&display=swap');
-  * { box-sizing: border-box; }
-  body { margin: 0; background: #0a0c0a; }
-
-  .shake {
-    animation: shake 0.5s cubic-bezier(.36,.07,.19,.97) both;
-  }
-  @keyframes shake {
-    10%, 90% { transform: translateX(-3px); }
-    20%, 80% { transform: translateX(6px); }
-    30%, 50%, 70% { transform: translateX(-6px); }
-    40%, 60% { transform: translateX(6px); }
-  }
-
-  @keyframes spin {
-    to { transform: rotate(360deg); }
-  }
-
-  button:hover:not(:disabled) {
-    filter: brightness(1.1);
-  }
-  button:active:not(:disabled) {
-    transform: scale(0.97);
-  }
-`;

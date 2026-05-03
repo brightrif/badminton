@@ -1,7 +1,7 @@
 import { useState } from "react";
-import { useApi } from "../hooks/useApi";
-import { useAuth } from "../context/AuthContext";
-import Modal, { FormField, Input, Select, SubmitBtn } from "../components/Modal";
+import { useDirectorApi as useApi } from "../../hooks/useDirectorApi";
+import { useAuth } from "../../context/AuthContext";
+import Modal, { FormField, Input, Select, SubmitBtn } from "../../components/Modal";
 
 function VenueCard({ v, onEdit, onDelete }) {
   const features = [

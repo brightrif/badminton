@@ -1,443 +1,843 @@
-import React, { useState, useEffect } from "react";
+// src/App.jsx
+//
+// Big-screen scoreboard — displayed on the venue projector/TV.
+// Driven entirely by WebSocket via useMatchSocket (no polling).
+//
+// Design direction: BROADCAST-GRADE / STADIUM
+//   - Full-bleed dark court atmosphere
+//   - Giant typography that reads from 20 metres
+//   - Yellow accent (#e8ff47) as the single dominant pop colour
+//   - Score changes trigger a cinematic flash pulse
+//   - Game-win and match-win moments get full-screen celebration overlays
+//   - Sponsors carousel at the bottom, slow fade-cycle
+
+import { useState, useEffect, useRef } from "react";
 import { Dot } from "lucide-react";
 import PlayerCard from "./components/PlayerCard";
 import SponsorDisplay from "./components/SponsorDisplay";
+import { useMatchSocket } from "./hooks/useMatchSocket";
 
-const API_BASE = "http://127.0.0.1:8000/api"; // Change if deployed
+const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000/api";
+
+// ─── Match selector ───────────────────────────────────────────────────────────
+// The big screen needs to know WHICH match to connect to.
+// We fetch the first live (or upcoming) match from the REST API once on mount,
+// then hand the id to useMatchSocket.  After that, all updates come via WS.
 
 export default function App() {
-  const [matchData, setMatchData] = useState(null);
+  const [matchId, setMatchId] = useState(null);
+  const [matchMeta, setMatchMeta] = useState(null); // static player/tournament info
   const [sponsors, setSponsors] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [isLive, setIsLive] = useState(true); // ← ONLY NEW STATE
-  const [minutesLeft, setMinutesLeft] = useState(null);
+  const [bootstrapError, setBootstrapError] = useState(null);
 
-  // Fetch a LIVE match + sponsors
+  // Score flash state
+  const [flashTeam, setFlashTeam] = useState(null); // 1 | 2
+  const prevScores = useRef({ t1: null, t2: null });
+
+  // Overlay states
+  const [gameWonOverlay, setGameWonOverlay] = useState(null); // { winner: 1|2, game: n }
+  const [matchWonOverlay, setMatchWonOverlay] = useState(null); // { winner: 1|2 }
+
+  // Sponsor carousel
+  const [sponsorIndex, setSponsorIndex] = useState(0);
+
+  // ── 1. Bootstrap: fetch match id + static metadata ──────────────────────────
   useEffect(() => {
-    const fetchLiveMatch = async () => {
+    const bootstrap = async () => {
       try {
-        // 1. Get any Live match
-        const matchRes = await fetch(`${API_BASE}/matches/live/`, {
-          headers: {
-            Accept: "application/json",
-          },
-        });
-        // 2. Parse the data immediately
-        const data = await matchRes.json();
-        const liveMatchesArray = data.results || data || [];
+        // Try live first, fall back to upcoming
+        let res = await fetch(`${API_BASE}/matches/live/`);
+        let data = await res.json();
+        let arr = Array.isArray(data) ? data : (data.results ?? []);
 
-        let liveMatch;
-        let currentIsLive = true;
-        if (!matchRes.ok || liveMatchesArray.length === 0) {
-          // No live match → get the next upcoming one
-          currentIsLive = false;
-          const upcomingRes = await fetch(`${API_BASE}/matches/upcoming`);
-          const upcomingData = await upcomingRes.json();
-          const upcomingArray = upcomingData.results || upcomingData || [];
-
-          if (upcomingArray.length === 0) {
-            setMatchData(null);
-            setLoading(false);
-            return;
-          }
-
-          liveMatch = upcomingArray[0];
-          setIsLive(false); // ← NEW flag
-        } else {
-          //liveMatch = await matchRes.json();
-          liveMatch = liveMatchesArray[0];
+        if (arr.length === 0) {
+          res = await fetch(`${API_BASE}/matches/upcoming/`);
+          data = await res.json();
+          arr = Array.isArray(data) ? data : (data.results ?? []);
         }
-        setIsLive(currentIsLive); // ← NEW flag
-        //const matchRes = await fetch(`${API_BASE}/matches/live`);
-        //if (!matchRes.ok) throw new Error("Network error");
 
-        //const data = await matchRes.json();
-
-        // DRF can return: {results: [...]}, or direct array if pagination is off
-        //const matchesArray = data.results || data || [];
-
-        //if (matchesArray.length === 0)
-        // throw new Error("No live match right now");
-        //const liveMatch = matchesArray[0]; // ← this will always work now
-
-        // 2. Get sponsors for this tournament
-        const sponsorsRes = await fetch(
-          `${API_BASE}/sponsors/?tournament=${liveMatch.tournament}`
-        );
-        const sponsorsJson = await sponsorsRes.json();
-        const tournamentSponsors = sponsorsJson.results || sponsorsJson;
-        // Transform API data → your frontend format
-        const transformed = {
-          id: liveMatch.id,
-          tournament: liveMatch.tournament_name,
-          match_type: liveMatch.match_type.replace("_", " ") + " - Final", // or remove "Final"
-          player1: {
-            id: liveMatch.player1_team1_detail.id,
-            name: liveMatch.player1_team1_detail.name,
-            country: liveMatch.player1_team1_detail.country_name || "Unknown",
-            country_code: liveMatch.player1_team1_detail.country_code || "",
-            photo_url:
-              liveMatch.player1_team1_detail.photo_url ||
-              "https://placehold.co/120x120/888/fff?text=" +
-                liveMatch.player1_team1_detail.name.charAt(0),
-          },
-          // NEW: Secondary Player for Team 1 (only if match_type is DOUBLES)
-          player1_secondary:
-            liveMatch.match_type.toLowerCase().includes("double") &&
-            liveMatch.player2_team1_detail
-              ? {
-                  id: liveMatch.player2_team1_detail.id,
-                  name: liveMatch.player2_team1_detail.name,
-                  country:
-                    liveMatch.player2_team1_detail.country_name || "Unknown",
-                  country_code:
-                    liveMatch.player2_team1_detail.country_code || "",
-                  photo_url:
-                    liveMatch.player2_team1_detail.photo_url ||
-                    "https://placehold.co/120x120/888/fff?text=" +
-                      liveMatch.player2_team1_detail.name.charAt(0),
-                }
-              : null,
-          player2: {
-            id: liveMatch.player1_team2_detail.id,
-            name: liveMatch.player1_team2_detail.name,
-            country: liveMatch.player1_team2_detail.country_name || "Unknown",
-            country_code: liveMatch.player1_team2_detail.country_code || "",
-            photo_url:
-              liveMatch.player1_team2_detail.photo_url ||
-              "https://placehold.co/120x120/888/fff?text=" +
-                liveMatch.player1_team2_detail.name.charAt(0),
-          },
-          // NEW: Secondary Player for Team 2 (only if match_type is DOUBLES)
-          player2_secondary:
-            liveMatch.match_type.toLowerCase().includes("double") &&
-            liveMatch.player2_team2_detail
-              ? {
-                  id: liveMatch.player2_team2_detail.id,
-                  name: liveMatch.player2_team2_detail.name,
-                  country:
-                    liveMatch.player2_team2_detail.country_name || "Unknown",
-                  country_code:
-                    liveMatch.player2_team2_detail.country_code || "",
-                  photo_url:
-                    liveMatch.player2_team2_detail.photo_url ||
-                    "https://placehold.co/120x120/888/fff?text=" +
-                      liveMatch.player2_team2_detail.name.charAt(0),
-                }
-              : null,
-          score: {
-            game1_player1:
-              liveMatch.game_scores.find((g) => g.game_number === 1)
-                ?.team1_score || 0,
-            game1_player2:
-              liveMatch.game_scores.find((g) => g.game_number === 1)
-                ?.team2_score || 0,
-            game2_player1:
-              liveMatch.game_scores.find((g) => g.game_number === 2)
-                ?.team1_score || 0,
-            game2_player2:
-              liveMatch.game_scores.find((g) => g.game_number === 2)
-                ?.team2_score || 0,
-            game3_player1:
-              liveMatch.game_scores.find((g) => g.game_number === 3)
-                ?.team1_score || 0,
-            game3_player2:
-              liveMatch.game_scores.find((g) => g.game_number === 3)
-                ?.team2_score || 0,
-            current_game: liveMatch.current_game,
-            player1_sets: liveMatch.team1_sets,
-            player2_sets: liveMatch.team2_sets,
-          },
-          scheduled_time: liveMatch.scheduled_time,
-          status: liveMatch.status,
-          server_id:
-            liveMatch.server_detail?.id || liveMatch.player1_team1_detail.id,
-        };
-
-        setMatchData(transformed);
-        setSponsors(
-          tournamentSponsors.map((s) => ({
-            name: s.name,
-            logo_url: s.logo_url,
-          }))
-        );
-
-        // Calculate minutes left if upcoming
-
-        // End of minutes left calc
-      } catch (err) {
-        console.error(err);
-        setError(err.message);
-        // Keep dummy data as fallback so UI doesn't break
-        setMatchData({
-          id: 101,
-          tournament: "No Live Match Found",
-          match_type: "Waiting for match...",
-          player1: {
-            id: 1,
-            name: "Player 1",
-            country: "TBD",
-            country_code: "??",
-            photo_url: "https://placehold.co/120x120/666/fff?text=?",
-          },
-          player2: {
-            id: 2,
-            name: "Player 2",
-            country: "TBD",
-            country_code: "??",
-            photo_url: "https://placehold.co/120x120/666/fff?text=?",
-          },
-          score: {
-            game1_player1: 0,
-            game1_player2: 0,
-            game2_player1: 0,
-            game2_player2: 0,
-            game3_player1: 0,
-            game3_player2: 0,
-            current_game: 1,
-            player1_sets: 0,
-            player2_sets: 0,
-          },
-          status: "Upcoming",
-          server_id: 1,
-        });
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchLiveMatch();
-    const interval = setInterval(fetchLiveMatch, 8000); // Auto-refresh every 8 seconds
-    return () => clearInterval(interval);
-  }, []);
-
-  // Dedicated useEffect for real-time countdown
-  useEffect(() => {
-    let timer;
-
-    // Only run if we have data and it's an upcoming match
-    if (matchData && !isLive && matchData.scheduled_time) {
-      const targetTime = new Date(matchData.scheduled_time).getTime();
-
-      const calculateTimeLeft = () => {
-        const now = Date.now();
-        const diff = targetTime - now; // Time difference in ms
-
-        if (diff <= 0) {
-          setMinutesLeft({ minutes: 0, seconds: 0 }); // Set to 00:00
-          clearInterval(timer); // Stop the timer
-          // The main 8-second poll will check if the match status changed to 'Live'
+        if (arr.length === 0) {
+          setBootstrapError("No matches scheduled.");
           return;
         }
 
-        // Convert ms to minutes and seconds
-        const totalSeconds = Math.floor(diff / 1000);
-        const minutes = Math.floor(totalSeconds / 60);
-        const seconds = totalSeconds % 60;
+        const match = arr[0];
+        setMatchId(match.id);
 
-        setMinutesLeft({ minutes, seconds });
-      };
+        // Fetch full match detail for player photos / names
+        const detailRes = await fetch(`${API_BASE}/matches/${match.id}/`);
+        const detail = await detailRes.json();
+        setMatchMeta(detail);
 
-      calculateTimeLeft(); // Initial calculation
-      timer = setInterval(calculateTimeLeft, 1000); // Update every second
-    } else {
-      // Clear the countdown if match is live or scheduled_time is missing
-      setMinutesLeft(null);
+        // Fetch sponsors for this tournament (once — they don't change live)
+        const sRes = await fetch(
+          `${API_BASE}/sponsors/?tournament=${match.tournament}`,
+        );
+        const sData = await sRes.json();
+        setSponsors(Array.isArray(sData) ? sData : (sData.results ?? []));
+      } catch (e) {
+        console.error("[App] bootstrap error:", e);
+        setBootstrapError("Could not load match data.");
+      }
+    };
+
+    bootstrap();
+  }, []);
+
+  // ── 2. Live score via WebSocket ──────────────────────────────────────────────
+  // No token — big screen is viewer-only
+  const { state, isConnected } = useMatchSocket(matchId);
+
+  // ── 3. React to score changes ────────────────────────────────────────────────
+  useEffect(() => {
+    const { t1, t2 } = prevScores.current;
+    if (t1 === null) {
+      prevScores.current = { t1: state.team1Score, t2: state.team2Score };
+      return;
     }
 
-    // Cleanup function: clears the interval when component unmounts or dependencies change
-    return () => clearInterval(timer);
-  }, [matchData, isLive]); // Runs when match data or live status changes
-  // Dedicated useEffect for real-time countdown ends here
+    if (state.team1Score !== t1) {
+      triggerFlash(1);
+    } else if (state.team2Score !== t2) {
+      triggerFlash(2);
+    }
 
-  if (loading) {
+    prevScores.current = { t1: state.team1Score, t2: state.team2Score };
+  }, [state.team1Score, state.team2Score]);
+
+  // ── 4. Game won / match won overlays ────────────────────────────────────────
+  useEffect(() => {
+    if (state.gameWon && !state.matchWon) {
+      setGameWonOverlay({
+        winner: state.lastAction === "point" ? state.winner : null,
+        game: state.currentGame - 1,
+      });
+      const t = setTimeout(() => setGameWonOverlay(null), 3500);
+      return () => clearTimeout(t);
+    }
+  }, [state.gameWon, state.currentGame]);
+
+  useEffect(() => {
+    if (state.matchWon) {
+      setMatchWonOverlay({ winner: state.winner });
+    }
+  }, [state.matchWon, state.winner]);
+
+  // ── 5. Sponsor carousel ──────────────────────────────────────────────────────
+  useEffect(() => {
+    if (sponsors.length <= 1) return;
+    const t = setInterval(() => {
+      setSponsorIndex((i) => (i + 1) % sponsors.length);
+    }, 4000);
+    return () => clearInterval(t);
+  }, [sponsors.length]);
+
+  const triggerFlash = (team) => {
+    setFlashTeam(team);
+    setTimeout(() => setFlashTeam(null), 700);
+  };
+
+  // ── Derived display values ───────────────────────────────────────────────────
+  const team1Name = matchMeta
+    ? [
+        matchMeta.player1_team1_detail?.name,
+        matchMeta.player2_team1_detail?.name,
+      ]
+        .filter(Boolean)
+        .join(" / ")
+    : "Team 1";
+
+  const team2Name = matchMeta
+    ? [
+        matchMeta.player1_team2_detail?.name,
+        matchMeta.player2_team2_detail?.name,
+      ]
+        .filter(Boolean)
+        .join(" / ")
+    : "Team 2";
+
+  const tournamentName = matchMeta?.tournament_name ?? "";
+  const matchType = matchMeta?.match_type?.replace("_", " ") ?? "";
+  const isLive = state.status === "Live";
+  const isUpcoming = state.status === "Upcoming" || !state.status;
+
+  const isTeam1Serving =
+    state.serverId &&
+    (state.serverId === matchMeta?.player1_team1_detail?.id ||
+      state.serverId === matchMeta?.player2_team1_detail?.id);
+
+  // ── Loading / error ──────────────────────────────────────────────────────────
+  if (bootstrapError) {
     return (
-      <div className="h-screen flex items-center justify-center bg-gradient-to-br from-blue-900 to-indigo-900">
-        <div className="text-white text-3xl">Loading Live Match...</div>
-      </div>
+      <FullScreenMessage
+        text={bootstrapError}
+        sub="Check admin panel for active matches."
+      />
     );
   }
 
-  if (!matchData) return null;
-
-  const {
-    player1,
-    player2,
-    score,
-    tournament,
-    match_type,
-    status,
-    server_id,
-    player1_secondary,
-    player2_secondary,
-  } = matchData;
-
-  // Check if Player 1 or their partner is serving (safer check for doubles)
-  //const isPlayer1Serving = server_id === player1.id;
-  const isPlayer1Serving =
-    server_id === player1.id || server_id === player1_secondary?.id;
-  // New flag to simplify doubles checks in JSX
-  //const isDoubles = match_type.toLowerCase().includes("double");
-
-  const getGameScore = (gameNum, playerNum) => {
-    const key = `game${gameNum}_player${playerNum}`;
-    return score[key] !== undefined ? score[key] : "-";
-  };
+  if (!matchMeta) {
+    return <FullScreenMessage text="LOADING MATCH…" pulse />;
+  }
 
   return (
-    <div className="h-screen overflow-hidden bg-gradient-to-br from-blue-900 to-indigo-900 text-white font-sans p-4 flex flex-col items-center gap-4">
-      {/* Tournament Header */}
-      <div className="w-full max-w-5xl text-center flex-shrink-0">
-        <h1 className="text-3xl sm:text-4xl font-bold text-yellow-400 mb-2 rounded-lg py-2 px-4 bg-blue-800 shadow-lg">
-          {tournament}
-        </h1>
-        <h2 className="text-xl sm:text-2xl font-semibold text-gray-200 rounded-lg py-1 px-3 bg-blue-700 shadow-md">
-          {match_type}
-        </h2>
+    <div style={S.page}>
+      <style>{CSS}</style>
+
+      {/* ── Background court lines ── */}
+      <div style={S.courtLines} aria-hidden="true">
+        <div style={S.courtLine1} />
+        <div style={S.courtLine2} />
+        <div style={S.courtCenter} />
       </div>
 
-      {/* Main Scoreboard */}
-      <div className="w-full max-w-5xl bg-blue-800 rounded-2xl shadow-2xl p-4 flex flex-col items-center justify-around relative overflow-hidden flex-grow">
-        <div className="absolute top-4 right-4 bg-red-600 text-white text-sm font-bold px-3 py-1 rounded-full shadow-md flex items-center gap-2">
-          <Dot className="w-8 h-8 animate-pulse" />
-          {status}
-        </div>
+      {/* ── Score flash overlay ── */}
+      {flashTeam && (
+        <div
+          style={{
+            ...S.flashOverlay,
+            background:
+              flashTeam === 1
+                ? "rgba(232,255,71,0.07)"
+                : "rgba(71,180,255,0.07)",
+          }}
+          className="flash-in"
+        />
+      )}
 
-        <div className="flex flex-col sm:flex-row justify-around items-center w-full gap-6">
-          <PlayerCard
-            player={player1}
-            secondaryPlayer={player1_secondary}
-            isServing={isPlayer1Serving}
-          />
-          <div className="flex flex-col items-center justify-center text-5xl font-extrabold text-yellow-400 mx-4">
-            <span className="text-2xl font-bold text-gray-300">VS</span>
-            <div className="flex items-center mt-2">
-              <span className="text-6xl font-bold">
-                {score[`game${score.current_game}_player1`]}
-              </span>
-              <span className="text-6xl font-bold mx-2">–</span>
-              <span className="text-6xl font-bold">
-                {score[`game${score.current_game}_player2`]}
-              </span>
-            </div>
-            <span className="text-xl text-gray-300 mt-1">
-              Game {score.current_game}
-            </span>
+      {/* ── Game won overlay ── */}
+      {gameWonOverlay && (
+        <div style={S.overlay} className="overlay-in">
+          <div style={S.overlayInner}>
+            <div style={S.overlayEyebrow}>GAME {gameWonOverlay.game}</div>
+            <div style={S.overlayTitle}>GAME OVER</div>
           </div>
-          <PlayerCard
-            player={player2}
-            secondaryPlayer={player2_secondary}
-            isServing={!isPlayer1Serving}
+        </div>
+      )}
+
+      {/* ── Match won overlay ── */}
+      {matchWonOverlay && (
+        <div
+          style={{ ...S.overlay, background: "rgba(12,15,12,0.97)" }}
+          className="overlay-in"
+        >
+          <div style={S.overlayInner}>
+            <div style={S.overlayEyebrow}>MATCH WINNER</div>
+            <div
+              style={{ ...S.overlayTitle, fontSize: "clamp(48px, 8vw, 96px)" }}
+            >
+              {matchWonOverlay.winner === 1 ? team1Name : team2Name}
+            </div>
+            <div style={S.overlayTrophy}>🏆</div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Top bar ── */}
+      <header style={S.topBar}>
+        <div style={S.tournamentBlock}>
+          <span style={S.tournamentName}>{tournamentName}</span>
+          <span style={S.matchTypePill}>{matchType}</span>
+        </div>
+
+        <div style={S.statusBlock}>
+          {isLive && (
+            <span style={S.liveBadge}>
+              <Dot
+                className="live-dot"
+                style={{ width: 28, height: 28, color: "#ff4444" }}
+              />
+              LIVE
+            </span>
+          )}
+          {isUpcoming && <span style={S.upcomingBadge}>UPCOMING</span>}
+          {state.status === "Completed" && (
+            <span style={S.completedBadge}>COMPLETED</span>
+          )}
+          {/* Connection dot */}
+          <span
+            style={{
+              ...S.connDot,
+              background: isConnected ? "#22c55e" : "#f59e0b",
+            }}
+            title={isConnected ? "Live" : "Reconnecting…"}
           />
         </div>
+      </header>
 
-        {/* Set Scores Table */}
-        <div className="w-full flex justify-center mt-6">
-          {isLive ? (
-            /* 1. SHOW THIS IF LIVE */
-            <div className="bg-blue-700 rounded-xl p-3 shadow-inner w-full max-w-lg">
-              <h3 className="text-lg font-semibold text-gray-200 text-center mb-2">
-                Set Scores
-              </h3>
-              <div className="grid grid-cols-6 gap-2 text-center text-gray-300 font-medium items-center">
-                <div className="col-span-2 text-left pl-2">Player</div>
-                <div>G1</div>
-                <div>G2</div>
-                <div>G3</div>
-                <div className="font-bold text-yellow-300">Sets</div>
+      {/* ── Main scoreboard ── */}
+      <main style={S.main}>
+        {/* Team 1 */}
+        <div style={S.teamBlock}>
+          <PlayerCard
+            player={matchMeta.player1_team1_detail}
+            secondaryPlayer={matchMeta.player2_team1_detail}
+            isServing={isTeam1Serving}
+          />
+          <div style={S.teamNameDisplay}>{team1Name}</div>
+        </div>
 
-                <div className="col-span-2 text-white font-semibold text-left pl-2 truncate text-sm sm:text-base">
-                  {player1.name}{" "}
-                  {player1_secondary && `& ${player1_secondary.name}`}
-                </div>
-                <div className="bg-blue-900/50 rounded py-1">
-                  {getGameScore(1, 1)}
-                </div>
-                <div className="bg-blue-900/50 rounded py-1">
-                  {getGameScore(2, 1)}
-                </div>
-                <div className="bg-blue-900/50 rounded py-1">
-                  {getGameScore(3, 1)}
-                </div>
-                <div className="font-bold text-yellow-300 text-lg">
-                  {score.player1_sets}
-                </div>
+        {/* Centre score ── */}
+        <div style={S.centreBlock}>
+          {/* Set dots */}
+          <div style={S.setDotsRow}>
+            <SetDots count={state.team1Sets} />
+            <span style={S.setLabel}>SETS</span>
+            <SetDots count={state.team2Sets} />
+          </div>
 
-                <div className="col-span-2 text-white font-semibold text-left pl-2 truncate text-sm sm:text-base">
-                  {player2.name}{" "}
-                  {player2_secondary && `& ${player2_secondary.name}`}
-                </div>
-                <div className="bg-blue-900/50 rounded py-1">
-                  {getGameScore(1, 2)}
-                </div>
-                <div className="bg-blue-900/50 rounded py-1">
-                  {getGameScore(2, 2)}
-                </div>
-                <div className="bg-blue-900/50 rounded py-1">
-                  {getGameScore(3, 2)}
-                </div>
-                <div className="font-bold text-yellow-300 text-lg">
-                  {score.player2_sets}
-                </div>
-              </div>
+          {/* Big scores */}
+          <div style={S.scoresRow}>
+            <div
+              style={{
+                ...S.bigScore,
+                color: flashTeam === 1 ? "#e8ff47" : "#fff",
+                textShadow:
+                  flashTeam === 1
+                    ? "0 0 60px rgba(232,255,71,0.6)"
+                    : "0 0 30px rgba(255,255,255,0.1)",
+                transform: flashTeam === 1 ? "scale(1.05)" : "scale(1)",
+              }}
+              className="score-digit"
+            >
+              {state.team1Score}
             </div>
-          ) : (
-            /* 2. SHOW THIS IF UPCOMING */
-            <div className="bg-blue-800/50 border border-blue-400/30 rounded-xl p-8 shadow-lg text-center w-full max-w-lg backdrop-blur-sm">
-              <h3 className="text-2xl sm:text-3xl font-bold text-yellow-400 animate-pulse mb-3">
-                Match Starts Shortly
-              </h3>
-              {/* Countdown message */}
 
-              {/* Conditional Countdown Display */}
-              {minutesLeft &&
-              (minutesLeft.minutes > 0 || minutesLeft.seconds > 0) ? (
-                <p className="text-blue-200 text-xl mt-4">
-                  The Match will start in:
-                  <span className="block text-4xl sm:text-5xl font-extrabold text-yellow-300 mt-2 tracking-widest animate-pulse">
-                    {String(minutesLeft.minutes).padStart(2, "0")} :{" "}
-                    {String(minutesLeft.seconds).padStart(2, "0")}
-                  </span>
-                  <span className="text-sm font-semibold text-gray-400 block mt-1">
-                    Minutes : Seconds
-                  </span>
-                </p>
-              ) : (
-                <p className="text-blue-200 text-lg">
-                  The match is due to start now. Checking for live updates...
-                </p>
-              )}
-              <div className="mt-4 text-sm text-gray-400 bg-blue-900/40 py-2 px-4 rounded-full inline-block">
-                Scheduled:{" "}
-                {new Date(
-                  matchData.scheduled_time || Date.now()
-                ).toLocaleTimeString([], {
-                  hour: "2-digit",
-                  minute: "2-digit",
-                })}
-              </div>
+            <div style={S.scoreSep}>
+              <span style={S.gameLabel}>GAME {state.currentGame}</span>
+              <span style={S.dash}>–</span>
+            </div>
+
+            <div
+              style={{
+                ...S.bigScore,
+                color: flashTeam === 2 ? "#71d4ff" : "#fff",
+                textShadow:
+                  flashTeam === 2
+                    ? "0 0 60px rgba(71,212,255,0.6)"
+                    : "0 0 30px rgba(255,255,255,0.1)",
+                transform: flashTeam === 2 ? "scale(1.05)" : "scale(1)",
+              }}
+              className="score-digit"
+            >
+              {state.team2Score}
+            </div>
+          </div>
+
+          {/* Game history pills */}
+          {state.gameScores.length > 0 && (
+            <div style={S.gameHistoryRow}>
+              {state.gameScores.map((gs) => (
+                <span key={gs.game_number} style={S.gameHistoryPill}>
+                  G{gs.game_number} &nbsp; {gs.team1_score} – {gs.team2_score}
+                </span>
+              ))}
             </div>
           )}
-        </div>
-        {/*end of Main Scoreboard */}
-      </div>
 
-      {/* Sponsors */}
-      <div className="w-full max-w-5xl bg-blue-800 rounded-2xl shadow-2xl p-4 flex-shrink-0">
-        <h3 className="text-xl font-bold text-yellow-400 text-center mb-4">
-          Our Sponsors
-        </h3>
-        <div className="flex flex-wrap justify-center items-center gap-6">
-          {sponsors.length > 0 ? (
-            sponsors.map((sponsor, i) => (
-              <SponsorDisplay key={i} sponsor={sponsor} />
-            ))
-          ) : (
-            <p className="text-gray-400">Loading sponsors...</p>
+          {/* Upcoming countdown */}
+          {isUpcoming && matchMeta?.scheduled_time && (
+            <CountdownTimer scheduledTime={matchMeta.scheduled_time} />
           )}
         </div>
-      </div>
+
+        {/* Team 2 */}
+        <div style={{ ...S.teamBlock, alignItems: "flex-end" }}>
+          <PlayerCard
+            player={matchMeta.player1_team2_detail}
+            secondaryPlayer={matchMeta.player2_team2_detail}
+            isServing={!isTeam1Serving && !!state.serverId}
+          />
+          <div style={{ ...S.teamNameDisplay, textAlign: "right" }}>
+            {team2Name}
+          </div>
+        </div>
+      </main>
+
+      {/* ── Sponsors strip ── */}
+      {sponsors.length > 0 && (
+        <footer style={S.sponsorBar}>
+          <span style={S.sponsorLabel}>SUPPORTED BY</span>
+          <div style={S.sponsorSlot}>
+            {sponsors.map((sp, i) => (
+              <div
+                key={sp.name}
+                style={{
+                  ...S.sponsorItem,
+                  opacity: i === sponsorIndex ? 1 : 0,
+                  transform:
+                    i === sponsorIndex ? "translateY(0)" : "translateY(8px)",
+                }}
+              >
+                <SponsorDisplay
+                  sponsor={{ ...sp, logo_url: sp.logo_url || sp.logo }}
+                />
+              </div>
+            ))}
+          </div>
+        </footer>
+      )}
     </div>
   );
 }
+
+// ── Sub-components ────────────────────────────────────────────────────────────
+
+function SetDots({ count }) {
+  return (
+    <div style={{ display: "flex", gap: "8px" }}>
+      {[0, 1].map((i) => (
+        <span
+          key={i}
+          style={{
+            width: 16,
+            height: 16,
+            borderRadius: "50%",
+            background: i < count ? "#e8ff47" : "rgba(255,255,255,0.12)",
+            boxShadow: i < count ? "0 0 12px rgba(232,255,71,0.5)" : "none",
+            transition: "all 0.3s ease",
+            display: "inline-block",
+          }}
+        />
+      ))}
+    </div>
+  );
+}
+
+function CountdownTimer({ scheduledTime }) {
+  const [timeLeft, setTimeLeft] = useState(calcTimeLeft(scheduledTime));
+
+  useEffect(() => {
+    const t = setInterval(() => setTimeLeft(calcTimeLeft(scheduledTime)), 1000);
+    return () => clearInterval(t);
+  }, [scheduledTime]);
+
+  if (!timeLeft) return null;
+
+  return (
+    <div style={S.countdown}>
+      <span style={S.countdownLabel}>STARTS IN</span>
+      <span style={S.countdownTime}>
+        {String(timeLeft.minutes).padStart(2, "0")}
+        <span style={S.countdownColon}>:</span>
+        {String(timeLeft.seconds).padStart(2, "0")}
+      </span>
+    </div>
+  );
+}
+
+function calcTimeLeft(scheduledTime) {
+  const diff = new Date(scheduledTime).getTime() - Date.now();
+  if (diff <= 0) return null;
+  return {
+    minutes: Math.floor(diff / 60000),
+    seconds: Math.floor((diff % 60000) / 1000),
+  };
+}
+
+function FullScreenMessage({ text, sub, pulse }) {
+  return (
+    <div
+      style={{
+        minHeight: "100dvh",
+        background: "#0c0f0c",
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        fontFamily: "'Bebas Neue', cursive",
+        gap: "16px",
+      }}
+    >
+      <style>{`@import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&display=swap');`}</style>
+      <div
+        style={{
+          fontSize: "clamp(32px, 5vw, 64px)",
+          color: "#fff",
+          letterSpacing: "6px",
+          animation: pulse ? "pulse 2s ease-in-out infinite" : "none",
+        }}
+      >
+        {text}
+      </div>
+      {sub && (
+        <div
+          style={{
+            fontSize: "16px",
+            color: "rgba(255,255,255,0.3)",
+            letterSpacing: "2px",
+          }}
+        >
+          {sub}
+        </div>
+      )}
+      <style>{`@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }`}</style>
+    </div>
+  );
+}
+
+// ── Styles ────────────────────────────────────────────────────────────────────
+const S = {
+  page: {
+    minHeight: "100dvh",
+    background: "#0c0f0c",
+    color: "#fff",
+    fontFamily: "'DM Sans', sans-serif",
+    display: "flex",
+    flexDirection: "column",
+    overflow: "hidden",
+    position: "relative",
+  },
+
+  // Decorative court line geometry
+  courtLines: {
+    position: "absolute",
+    inset: 0,
+    pointerEvents: "none",
+    zIndex: 0,
+    overflow: "hidden",
+  },
+  courtLine1: {
+    position: "absolute",
+    top: "10%",
+    bottom: "10%",
+    left: "50%",
+    width: "1px",
+    background: "rgba(255,255,255,0.04)",
+    transform: "translateX(-50%)",
+  },
+  courtLine2: {
+    position: "absolute",
+    left: "10%",
+    right: "10%",
+    top: "50%",
+    height: "1px",
+    background: "rgba(255,255,255,0.04)",
+    transform: "translateY(-50%)",
+  },
+  courtCenter: {
+    position: "absolute",
+    top: "50%",
+    left: "50%",
+    width: "120px",
+    height: "120px",
+    border: "1px solid rgba(255,255,255,0.04)",
+    borderRadius: "50%",
+    transform: "translate(-50%, -50%)",
+  },
+
+  flashOverlay: {
+    position: "fixed",
+    inset: 0,
+    zIndex: 5,
+    pointerEvents: "none",
+  },
+
+  overlay: {
+    position: "fixed",
+    inset: 0,
+    background: "rgba(12,15,12,0.88)",
+    zIndex: 50,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    backdropFilter: "blur(4px)",
+  },
+  overlayInner: {
+    textAlign: "center",
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    gap: "8px",
+  },
+  overlayEyebrow: {
+    fontFamily: "'DM Sans', sans-serif",
+    fontSize: "clamp(14px, 2vw, 20px)",
+    fontWeight: "700",
+    letterSpacing: "6px",
+    color: "rgba(255,255,255,0.4)",
+  },
+  overlayTitle: {
+    fontFamily: "'Bebas Neue', cursive",
+    fontSize: "clamp(64px, 12vw, 140px)",
+    letterSpacing: "8px",
+    color: "#e8ff47",
+    lineHeight: 1,
+    textShadow: "0 0 80px rgba(232,255,71,0.4)",
+  },
+  overlayTrophy: {
+    fontSize: "clamp(48px, 8vw, 80px)",
+    marginTop: "12px",
+    animation: "trophy-bounce 0.6s ease infinite alternate",
+  },
+
+  topBar: {
+    position: "relative",
+    zIndex: 10,
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    padding: "clamp(12px, 2vh, 24px) clamp(16px, 3vw, 48px)",
+    borderBottom: "1px solid rgba(255,255,255,0.05)",
+  },
+  tournamentBlock: {
+    display: "flex",
+    alignItems: "center",
+    gap: "12px",
+  },
+  tournamentName: {
+    fontFamily: "'Bebas Neue', cursive",
+    fontSize: "clamp(18px, 2.5vw, 32px)",
+    letterSpacing: "4px",
+    color: "#fff",
+  },
+  matchTypePill: {
+    background: "rgba(255,255,255,0.06)",
+    border: "1px solid rgba(255,255,255,0.1)",
+    borderRadius: "20px",
+    padding: "4px 14px",
+    fontSize: "clamp(10px, 1vw, 13px)",
+    fontWeight: "600",
+    letterSpacing: "1.5px",
+    color: "rgba(255,255,255,0.5)",
+    textTransform: "uppercase",
+  },
+  statusBlock: {
+    display: "flex",
+    alignItems: "center",
+    gap: "12px",
+  },
+  liveBadge: {
+    display: "flex",
+    alignItems: "center",
+    gap: "2px",
+    background: "rgba(255,68,68,0.15)",
+    border: "1px solid rgba(255,68,68,0.3)",
+    borderRadius: "20px",
+    padding: "4px 14px 4px 6px",
+    fontFamily: "'Bebas Neue', cursive",
+    fontSize: "clamp(14px, 1.5vw, 20px)",
+    letterSpacing: "3px",
+    color: "#ff6b6b",
+  },
+  upcomingBadge: {
+    background: "rgba(245,158,11,0.15)",
+    border: "1px solid rgba(245,158,11,0.3)",
+    borderRadius: "20px",
+    padding: "4px 14px",
+    fontFamily: "'Bebas Neue', cursive",
+    fontSize: "clamp(14px, 1.5vw, 20px)",
+    letterSpacing: "3px",
+    color: "#f59e0b",
+  },
+  completedBadge: {
+    background: "rgba(148,163,184,0.1)",
+    border: "1px solid rgba(148,163,184,0.2)",
+    borderRadius: "20px",
+    padding: "4px 14px",
+    fontFamily: "'Bebas Neue', cursive",
+    fontSize: "clamp(14px, 1.5vw, 20px)",
+    letterSpacing: "3px",
+    color: "#94a3b8",
+  },
+  connDot: {
+    width: 8,
+    height: 8,
+    borderRadius: "50%",
+    flexShrink: 0,
+    transition: "background 0.5s ease",
+  },
+
+  main: {
+    position: "relative",
+    zIndex: 10,
+    flex: 1,
+    display: "grid",
+    gridTemplateColumns: "1fr auto 1fr",
+    alignItems: "center",
+    gap: "clamp(8px, 2vw, 32px)",
+    padding: "clamp(16px, 3vh, 48px) clamp(16px, 3vw, 64px)",
+  },
+
+  teamBlock: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "flex-start",
+    gap: "12px",
+  },
+  teamNameDisplay: {
+    fontFamily: "'Bebas Neue', cursive",
+    fontSize: "clamp(18px, 2.5vw, 36px)",
+    letterSpacing: "3px",
+    color: "rgba(255,255,255,0.7)",
+    lineHeight: 1.2,
+  },
+
+  centreBlock: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    gap: "clamp(8px, 1.5vh, 20px)",
+  },
+  setDotsRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: "16px",
+  },
+  setLabel: {
+    fontFamily: "'DM Sans', sans-serif",
+    fontSize: "clamp(10px, 1vw, 13px)",
+    fontWeight: "700",
+    letterSpacing: "3px",
+    color: "rgba(255,255,255,0.25)",
+  },
+  scoresRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: "clamp(8px, 2vw, 32px)",
+  },
+  bigScore: {
+    fontFamily: "'Bebas Neue', cursive",
+    fontSize: "clamp(80px, 14vw, 180px)",
+    lineHeight: 1,
+    transition: "color 0.4s ease, transform 0.15s ease, text-shadow 0.4s ease",
+    minWidth: "1.2ch",
+    textAlign: "center",
+  },
+  scoreSep: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    gap: "4px",
+  },
+  gameLabel: {
+    fontFamily: "'DM Sans', sans-serif",
+    fontSize: "clamp(9px, 0.9vw, 12px)",
+    fontWeight: "700",
+    letterSpacing: "3px",
+    color: "rgba(255,255,255,0.25)",
+  },
+  dash: {
+    fontFamily: "'Bebas Neue', cursive",
+    fontSize: "clamp(32px, 5vw, 60px)",
+    color: "rgba(255,255,255,0.15)",
+    lineHeight: 1,
+  },
+
+  gameHistoryRow: {
+    display: "flex",
+    gap: "8px",
+    flexWrap: "wrap",
+    justifyContent: "center",
+  },
+  gameHistoryPill: {
+    background: "rgba(255,255,255,0.05)",
+    border: "1px solid rgba(255,255,255,0.08)",
+    borderRadius: "20px",
+    padding: "4px 14px",
+    fontSize: "clamp(11px, 1vw, 14px)",
+    color: "rgba(255,255,255,0.35)",
+    fontFamily: "'DM Mono', monospace",
+    letterSpacing: "1px",
+  },
+
+  countdown: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    gap: "4px",
+    marginTop: "8px",
+  },
+  countdownLabel: {
+    fontSize: "clamp(10px, 1vw, 13px)",
+    fontWeight: "700",
+    letterSpacing: "4px",
+    color: "rgba(255,255,255,0.3)",
+  },
+  countdownTime: {
+    fontFamily: "'Bebas Neue', cursive",
+    fontSize: "clamp(36px, 5vw, 64px)",
+    color: "#f59e0b",
+    letterSpacing: "4px",
+    lineHeight: 1,
+  },
+  countdownColon: {
+    animation: "blink 1s step-end infinite",
+    margin: "0 2px",
+  },
+
+  sponsorBar: {
+    position: "relative",
+    zIndex: 10,
+    borderTop: "1px solid rgba(255,255,255,0.05)",
+    padding: "clamp(10px, 1.5vh, 20px) clamp(16px, 3vw, 48px)",
+    display: "flex",
+    alignItems: "center",
+    gap: "24px",
+  },
+  sponsorLabel: {
+    fontSize: "clamp(9px, 0.8vw, 11px)",
+    fontWeight: "700",
+    letterSpacing: "3px",
+    color: "rgba(255,255,255,0.2)",
+    whiteSpace: "nowrap",
+    flexShrink: 0,
+  },
+  sponsorSlot: {
+    position: "relative",
+    height: "50px",
+    flex: 1,
+  },
+  sponsorItem: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    transition: "opacity 0.8s ease, transform 0.8s ease",
+  },
+};
+
+const CSS = `
+  @import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@400;600;700&family=DM+Mono&display=swap');
+
+  *, *::before, *::after { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: #0c0f0c; overflow: hidden; }
+  #root { height: 100dvh; }
+
+  .live-dot {
+    animation: live-pulse 1.2s ease-in-out infinite;
+  }
+  @keyframes live-pulse {
+    0%, 100% { opacity: 1; }
+    50%       { opacity: 0.3; }
+  }
+
+  .score-digit {
+    transition: color 0.4s ease, transform 0.15s cubic-bezier(0.34,1.56,0.64,1), text-shadow 0.4s ease;
+  }
+
+  .flash-in {
+    animation: flash-fade 0.7s ease-out both;
+  }
+  @keyframes flash-fade {
+    0%   { opacity: 1; }
+    100% { opacity: 0; }
+  }
+
+  .overlay-in {
+    animation: overlay-appear 0.35s cubic-bezier(0.16,1,0.3,1) both;
+  }
+  @keyframes overlay-appear {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+  }
+
+  @keyframes trophy-bounce {
+    from { transform: translateY(0); }
+    to   { transform: translateY(-12px); }
+  }
+
+  @keyframes blink {
+    0%, 100% { opacity: 1; }
+    50%       { opacity: 0; }
+  }
+`;

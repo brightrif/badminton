@@ -1,7 +1,7 @@
 import { useState } from "react";
-import { useApi } from "../hooks/useApi";
-import { useAuth } from "../context/AuthContext";
-import Modal, { FormField, Input, SubmitBtn } from "../components/Modal";
+import { useDirectorApi as useApi } from "../../hooks/useDirectorApi";
+import { useAuth } from "../../context/AuthContext";
+import Modal, { FormField, Input, SubmitBtn } from "../../components/Modal";
 
 function TournamentCard({ t, onEdit, onDelete }) {
   const start = new Date(t.start_date).toLocaleDateString("en-GB", { day:"numeric", month:"short", year:"numeric" });

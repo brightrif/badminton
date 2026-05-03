@@ -1,19 +1,27 @@
 import { useState } from "react";
-import { useAuth } from "../context/AuthContext";
+import { useAuth } from "../../context/AuthContext";
+import { useNavigate } from "react-router-dom";
 
 export default function Login() {
   const { login } = useAuth();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
-  const [error,    setError]    = useState("");
-  const [loading,  setLoading]  = useState(false);
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const navigate = useNavigate();
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setError(""); setLoading(true);
-    try { await login(username, password); }
-    catch { setError("Invalid username or password."); }
-    finally { setLoading(false); }
+    setError("");
+    setLoading(true);
+    try {
+      await login(username, password);
+      navigate("/director/dashboard", { replace: true });
+    } catch {
+      setError("Invalid username or password.");
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -22,11 +30,13 @@ export default function Login() {
       <div style={S.left}>
         <div style={S.brand}>
           <div style={S.shuttle}>🏸</div>
-          <div style={S.brandName}>BWF Director</div>
+          <div style={S.brandName}>Tournament Director</div>
           <div style={S.brandSub}>Tournament Management Portal</div>
         </div>
         <div style={S.tagline}>
-          "Every great match<br />starts with a great draw."
+          "Every great match
+          <br />
+          starts with a great draw."
         </div>
       </div>
 
@@ -46,7 +56,7 @@ export default function Login() {
               type="text"
               autoComplete="username"
               value={username}
-              onChange={e => setUsername(e.target.value)}
+              onChange={(e) => setUsername(e.target.value)}
               placeholder="director@tournament"
               required
             />
@@ -59,13 +69,16 @@ export default function Login() {
               type="password"
               autoComplete="current-password"
               value={password}
-              onChange={e => setPassword(e.target.value)}
+              onChange={(e) => setPassword(e.target.value)}
               placeholder="••••••••"
               required
             />
           </div>
 
-          <button style={{ ...S.btn, opacity: loading ? 0.6 : 1 }} disabled={loading}>
+          <button
+            style={{ ...S.btn, opacity: loading ? 0.6 : 1 }}
+            disabled={loading}
+          >
             {loading ? "Signing in…" : "Sign In →"}
           </button>
 
@@ -88,41 +101,96 @@ const CSS = `
 const S = {
   page: { display: "flex", minHeight: "100vh", background: "#0a0a0a" },
   left: {
-    flex: 1, display: "flex", flexDirection: "column", justifyContent: "space-between",
-    padding: "60px", background: "linear-gradient(135deg, #0f1a00 0%, #1a2d00 50%, #0a0a0a 100%)",
+    flex: 1,
+    display: "flex",
+    flexDirection: "column",
+    justifyContent: "space-between",
+    padding: "60px",
+    background:
+      "linear-gradient(135deg, #0f1a00 0%, #1a2d00 50%, #0a0a0a 100%)",
     borderRight: "1px solid rgba(200,255,0,0.1)",
   },
   brand: { display: "flex", flexDirection: "column", gap: 12 },
   shuttle: { fontSize: 48 },
-  brandName: { fontFamily: "'DM Serif Display', serif", fontSize: 42, color: "#c8ff00", letterSpacing: "-1px" },
-  brandSub:  { fontSize: 14, color: "rgba(200,255,0,0.5)", letterSpacing: "2px", textTransform: "uppercase" },
-  tagline: {
-    fontFamily: "'DM Serif Display', serif", fontSize: 28, color: "rgba(255,255,255,0.2)",
-    lineHeight: 1.4, fontStyle: "italic",
+  brandName: {
+    fontFamily: "'DM Serif Display', serif",
+    fontSize: 42,
+    color: "#c8ff00",
+    letterSpacing: "-1px",
   },
-  right: { width: 480, display: "flex", alignItems: "center", justifyContent: "center", padding: 40 },
+  brandSub: {
+    fontSize: 14,
+    color: "rgba(200,255,0,0.5)",
+    letterSpacing: "2px",
+    textTransform: "uppercase",
+  },
+  tagline: {
+    fontFamily: "'DM Serif Display', serif",
+    fontSize: 28,
+    color: "rgba(255,255,255,0.2)",
+    lineHeight: 1.4,
+    fontStyle: "italic",
+  },
+  right: {
+    width: 480,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 40,
+  },
   card: {
-    width: "100%", background: "#111", border: "1px solid rgba(255,255,255,0.08)",
-    borderRadius: 20, padding: "48px 40px", display: "flex", flexDirection: "column", gap: 24,
+    width: "100%",
+    background: "#111",
+    border: "1px solid rgba(255,255,255,0.08)",
+    borderRadius: 20,
+    padding: "48px 40px",
+    display: "flex",
+    flexDirection: "column",
+    gap: 24,
   },
   cardHead: { display: "flex", flexDirection: "column", gap: 6 },
-  cardTitle: { fontFamily: "'DM Serif Display', serif", fontSize: 30, color: "#fff" },
-  cardSub:   { fontSize: 14, color: "rgba(255,255,255,0.4)" },
+  cardTitle: {
+    fontFamily: "'DM Serif Display', serif",
+    fontSize: 30,
+    color: "#fff",
+  },
+  cardSub: { fontSize: 14, color: "rgba(255,255,255,0.4)" },
   err: {
-    background: "rgba(255,60,60,0.1)", border: "1px solid rgba(255,60,60,0.3)",
-    color: "#ff6b6b", borderRadius: 10, padding: "12px 16px", fontSize: 13,
+    background: "rgba(255,60,60,0.1)",
+    border: "1px solid rgba(255,60,60,0.3)",
+    color: "#ff6b6b",
+    borderRadius: 10,
+    padding: "12px 16px",
+    fontSize: 13,
   },
   field: { display: "flex", flexDirection: "column", gap: 8 },
-  label: { fontSize: 12, fontWeight: 600, color: "rgba(255,255,255,0.5)", letterSpacing: "1px", textTransform: "uppercase" },
+  label: {
+    fontSize: 12,
+    fontWeight: 600,
+    color: "rgba(255,255,255,0.5)",
+    letterSpacing: "1px",
+    textTransform: "uppercase",
+  },
   input: {
-    background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.1)",
-    borderRadius: 10, padding: "14px 16px", color: "#fff", fontSize: 15,
+    background: "rgba(255,255,255,0.04)",
+    border: "1px solid rgba(255,255,255,0.1)",
+    borderRadius: 10,
+    padding: "14px 16px",
+    color: "#fff",
+    fontSize: 15,
     transition: "border-color 0.2s, box-shadow 0.2s",
   },
   btn: {
-    background: "#c8ff00", color: "#0a0a0a", border: "none", borderRadius: 10,
-    padding: "16px", fontSize: 15, fontWeight: 700, cursor: "pointer",
-    transition: "opacity 0.2s", letterSpacing: "0.5px",
+    background: "#c8ff00",
+    color: "#0a0a0a",
+    border: "none",
+    borderRadius: 10,
+    padding: "16px",
+    fontSize: 15,
+    fontWeight: 700,
+    cursor: "pointer",
+    transition: "opacity 0.2s",
+    letterSpacing: "0.5px",
   },
   hint: { fontSize: 12, color: "rgba(255,255,255,0.2)", textAlign: "center" },
 };

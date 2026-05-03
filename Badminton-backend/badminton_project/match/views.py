@@ -41,46 +41,9 @@ TOKEN_TTL_SECONDS = 60 * 60 * 12   # 12 hours — covers a full match day
 #     sig = hmac.new(secret.encode(), payload.encode(), hashlib.sha256).hexdigest()
 #     return f"{payload}:{sig}"
 
-@action(detail=True, methods=['post'], url_path='umpire_token',
-        authentication_classes=[JWTAuthentication],
-        permission_classes=[IsAuthenticated])
-def umpire_token(self, request, pk=None):
-    """
-    POST /api/matches/<id>/umpire_token/
-    Header: Authorization: Bearer <jwt>
 
-    For umpires who log in with username/password instead of PIN.
-    Issues the same HMAC token so the WS consumer needs no changes.
-    """
-    match = self.get_object()
-    token = make_token(match.id)
-    return Response({
-        'token': token,
-        'match_id': match.id,
-        'expires_in_seconds': TOKEN_TTL_SECONDS,
-    })
 
-def verify_umpire_token(match_id: int, token: str) -> bool:
-    """
-    Returns True if the token is valid for this match_id and not expired.
-    Called by the WebSocket consumer before accepting score updates.
-    """
-    try:
-        parts = token.split(':')
-        if len(parts) != 3:
-            return False
-        mid, ts_str, sig = parts
-        if int(mid) != match_id:
-            return False
-        ts = int(ts_str)
-        if time.time() - ts > TOKEN_TTL_SECONDS:
-            return False
-        payload = f"{mid}:{ts_str}"
-        secret = getattr(settings, 'SECRET_KEY', 'fallback-secret')
-        expected_sig = hmac.new(secret.encode(), payload.encode(), hashlib.sha256).hexdigest()
-        return hmac.compare_digest(sig, expected_sig)
-    except Exception:
-        return False
+
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -401,8 +364,25 @@ class MatchViewSet(viewsets.ModelViewSet):
             'expires_in_seconds': TOKEN_TTL_SECONDS,
         })
     # ─────────────────────────────────────────────────────────────────────────
+    @action(detail=True, methods=['post'], url_path='umpire_token',
+        authentication_classes=[JWTAuthentication],permission_classes=[IsAuthenticated])
+    def umpire_token(self, request, pk=None):
+        """
+        POST /api/matches/<id>/umpire_token/
+        Header: Authorization: Bearer <jwt>
 
-
+        For umpires who log in with username/password instead of PIN.
+        Issues the same HMAC token so the WS consumer needs no changes.
+        """
+        match = self.get_object()
+        token = make_token(match.id)
+        return Response({
+            'token': token,
+            'match_id': match.id,
+            'expires_in_seconds': TOKEN_TTL_SECONDS,
+        })
+    
+    
 class SponsorViewSet(viewsets.ModelViewSet):
     queryset = Sponsor.objects.all()
     serializer_class = SponsorSerializer
