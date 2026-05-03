@@ -2,7 +2,6 @@ from django.db import models
 from django.core.exceptions import ValidationError
 import random
 
-
 class Country(models.Model):
     name = models.CharField(max_length=100, unique=True)
     code = models.CharField(max_length=3, unique=True)
@@ -220,7 +219,26 @@ class Match(models.Model):
         help_text="4-digit PIN for umpire access. Set in admin before match day."
     )
     # ─────────────────────────────────────────────────────────────────────────
+        # ── Scoring format ────────────────────────────────────────────────────────────
+    SCORING_15_NO_SET      = '15_NO_SET'
+    SCORING_15_WITH_SET    = '15_WITH_SET'
+    SCORING_21_NO_SET      = '21_NO_SET'
+    SCORING_21_WITH_SET    = '21_WITH_SET'
 
+    SCORING_FORMAT_CHOICES = [
+        (SCORING_15_NO_SET,   '15 pts – no settings'),
+        (SCORING_15_WITH_SET, '15 pts – settings up to 21'),
+        (SCORING_21_NO_SET,   '21 pts – no settings'),
+        (SCORING_21_WITH_SET, '21 pts – settings up to 30'),
+    ]
+
+    scoring_format = models.CharField(
+        max_length=20,
+        choices=SCORING_FORMAT_CHOICES,
+        default=SCORING_21_WITH_SET,
+        help_text="Scoring format for this match."
+    )
+    # ─────────────────────────────────────────────────────────────────────────────
     venue = models.ForeignKey(
         Venue, on_delete=models.SET_NULL,
         null=True, blank=True, related_name='matches'
@@ -229,7 +247,13 @@ class Match(models.Model):
         Court, on_delete=models.SET_NULL,
         null=True, blank=True, related_name='matches'
     )
-
+    event = models.ForeignKey(
+        'TournamentEvent',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='matches',
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     
@@ -253,6 +277,25 @@ class Match(models.Model):
         )
         return score, created
 
+    def _check_game_won(self, t1: int, t2: int) -> bool:
+        """Return True when a game is over given the current scoring format."""
+        fmt = self.scoring_format
+        if fmt == self.SCORING_15_NO_SET:
+            return t1 >= 15 or t2 >= 15
+        elif fmt == self.SCORING_15_WITH_SET:
+            return (
+                (t1 >= 15 and t1 - t2 >= 2) or
+                (t2 >= 15 and t2 - t1 >= 2) or
+                t1 == 21 or t2 == 21
+            )
+        elif fmt == self.SCORING_21_NO_SET:
+            return t1 >= 21 or t2 >= 21
+        else:  # SCORING_21_WITH_SET (default / international)
+            return (
+                (t1 >= 21 and t1 - t2 >= 2) or
+                (t2 >= 21 and t2 - t1 >= 2) or
+                t1 == 30 or t2 == 30
+            )
     def apply_point(self, team: int) -> dict:
         """
         Add one point to `team` (1 or 2) for the current game.
@@ -288,15 +331,17 @@ class Match(models.Model):
             'game_won': False,
             'match_won': False,
             'winner': None,
+            'scoring_format': self.scoring_format,
         }
 
         # Check for game win
         t1, t2 = score.team1_score, score.team2_score
-        game_won = (
-            (t1 >= 21 and t1 - t2 >= 2) or
-            (t2 >= 21 and t2 - t1 >= 2) or
-            t1 == 30 or t2 == 30
-        )
+        game_won = self._check_game_won(t1, t2)
+        # game_won = (
+        #     (t1 >= 21 and t1 - t2 >= 2) or
+        #     (t2 >= 21 and t2 - t1 >= 2) or
+        #     t1 == 30 or t2 == 30
+        # )
 
         if game_won:
             result['game_won'] = True

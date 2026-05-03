@@ -191,7 +191,7 @@ class MatchSerializer(serializers.ModelSerializer):
             'team1_sets', 'team2_sets',
             'venue', 'venue_name', 'court', 'court_name',
             'game_scores', 'current_game_score', 'match_winner',
-            'created_at', 'updated_at'
+            'created_at', 'updated_at','scoring_format'
         ]
         read_only_fields = ['created_at', 'updated_at']
 
@@ -260,7 +260,7 @@ class MatchListSerializer(serializers.ModelSerializer):
             'player1_team1_name', 'player2_team1_name',
             'player1_team2_name', 'player2_team2_name',
             'scheduled_time', 'team1_sets', 'team2_sets',
-            'venue_name', 'court_name'
+            'venue_name', 'court_name','scoring_format'
         ]
 
 
@@ -276,7 +276,7 @@ class MatchCreateUpdateSerializer(serializers.ModelSerializer):
             'player1_team2', 'player2_team2',
             'server', 'scheduled_time', 'status',
             'current_game', 'team1_sets', 'team2_sets',
-            'venue', 'court', 'game_scores'
+            'venue', 'court', 'game_scores','scoring_format'
         ]
 
     @transaction.atomic
