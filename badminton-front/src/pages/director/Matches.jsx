@@ -1,4 +1,11 @@
 // src/pages/director/Matches.jsx
+//
+// Changes from previous version:
+//  - MatchForm now loads doubles teams for the selected event
+//  - When an event is DOUBLES/MIXED_DOUBLES AND teams exist → shows team dropdowns
+//    instead of 4 individual player pickers; selecting a team fills both player FKs
+//  - "Team mode" badge shown in player source bar when teams are active
+//  - Individual player pickers remain when no teams exist (graceful fallback)
 
 import { useState, useEffect, useCallback } from "react";
 import { useDirectorApi as useApi } from "../../hooks/useDirectorApi";
@@ -107,14 +114,21 @@ function MatchForm({ initial, onSave, onClose }) {
     court: initial?.court || "",
     status: initial?.status || "Upcoming",
   });
+
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-
-  // ── Registered players for the selected event ─────────────────────────────
   const [eventPlayers, setEventPlayers] = useState(null);
   const [loadingEventPlayers, setLoadingEventPlayers] = useState(false);
   const [playerSource, setPlayerSource] = useState("all");
 
+  // ── NEW: doubles teams ─────────────────────────────────────────────────────
+  const [eventTeams, setEventTeams] = useState([]); // DoublesTeam[]
+  const [loadingTeams, setLoadingTeams] = useState(false);
+  // Selected team IDs (for the two sides)
+  const [selectedTeam1Id, setSelectedTeam1Id] = useState("");
+  const [selectedTeam2Id, setSelectedTeam2Id] = useState("");
+
+  // ── Load registered players when event changes ─────────────────────────────
   const loadEventPlayers = useCallback(
     async (eventId) => {
       if (!eventId) {
@@ -140,9 +154,66 @@ function MatchForm({ initial, onSave, onClose }) {
     [authFetch],
   );
 
+  // ── NEW: load doubles teams when event changes ─────────────────────────────
+  const loadEventTeams = useCallback(
+    async (eventId, matchType) => {
+      const isDoubles =
+        matchType === "DOUBLES" || matchType === "MIXED_DOUBLES";
+      if (!eventId || !isDoubles) {
+        setEventTeams([]);
+        return;
+      }
+      setLoadingTeams(true);
+      try {
+        const res = await authFetch(
+          `/api/doubles-teams/teams_for_event/?event=${eventId}`,
+        );
+        const data = await res.json();
+        setEventTeams(data.teams || []);
+      } catch {
+        setEventTeams([]);
+      } finally {
+        setLoadingTeams(false);
+      }
+    },
+    [authFetch],
+  );
+
   useEffect(() => {
     loadEventPlayers(form.event);
   }, [form.event, loadEventPlayers]);
+  useEffect(() => {
+    loadEventTeams(form.event, form.match_type);
+  }, [form.event, form.match_type, loadEventTeams]);
+
+  // ── When a team is picked, write its players into form ────────────────────
+  const handleTeam1Change = (teamId) => {
+    setSelectedTeam1Id(teamId);
+    const team = eventTeams.find((t) => String(t.id) === String(teamId));
+    if (team) {
+      setForm((f) => ({
+        ...f,
+        player1_team1: String(team.player1_id),
+        player2_team1: String(team.player2_id),
+      }));
+    } else {
+      setForm((f) => ({ ...f, player1_team1: "", player2_team1: "" }));
+    }
+  };
+
+  const handleTeam2Change = (teamId) => {
+    setSelectedTeam2Id(teamId);
+    const team = eventTeams.find((t) => String(t.id) === String(teamId));
+    if (team) {
+      setForm((f) => ({
+        ...f,
+        player1_team2: String(team.player1_id),
+        player2_team2: String(team.player2_id),
+      }));
+    } else {
+      setForm((f) => ({ ...f, player1_team2: "", player2_team2: "" }));
+    }
+  };
 
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
 
@@ -150,6 +221,8 @@ function MatchForm({ initial, onSave, onClose }) {
     const eventId = e.target.value;
     const evArr = Array.isArray(allEvents) ? allEvents : [];
     const chosen = evArr.find((ev) => String(ev.id) === eventId);
+    setSelectedTeam1Id("");
+    setSelectedTeam2Id("");
     setForm((f) => ({
       ...f,
       event: eventId,
@@ -178,6 +251,9 @@ function MatchForm({ initial, onSave, onClose }) {
   };
 
   const isDoubles = form.match_type !== "SINGLE";
+  // Use team-select mode when event has teams defined
+  const useTeamMode = isDoubles && eventTeams.length > 0;
+
   const tournOpts = Array.isArray(tournaments) ? tournaments : [];
   const venueOpts = Array.isArray(venues) ? venues : [];
   const courtOpts = Array.isArray(courts) ? courts : [];
@@ -251,56 +327,51 @@ function MatchForm({ initial, onSave, onClose }) {
           Selecting an event pre-fills the tournament, match type, and filters
           the player list.
         </div>
-        <select
-          style={S.eventSelect}
-          value={form.event}
-          onChange={handleEventChange}
-        >
-          <option value="">— No event / pick manually —</option>
-          {tournOpts.map((t) => {
-            const tEvents = evArr.filter(
-              (ev) => String(ev.tournament) === String(t.id),
-            );
-            if (tEvents.length === 0) return null;
-            return (
-              <optgroup key={t.id} label={t.name}>
-                {tEvents.map((ev) => (
-                  <option key={ev.id} value={ev.id}>
-                    {ev.name} — {ev.match_type_display || ev.match_type}
-                    {ev.round_label ? ` (${ev.round_label})` : ""}
-                  </option>
-                ))}
-              </optgroup>
-            );
-          })}
-        </select>
+        <Select value={form.event} onChange={handleEventChange}>
+          <option value="">— No event selected —</option>
+          {evArr.map((ev) => (
+            <option key={ev.id} value={ev.id}>
+              {ev.name}
+            </option>
+          ))}
+        </Select>
       </div>
 
-      {/* ── Player filter notice ── */}
+      {/* ── Player / team source banner ── */}
       {form.event && (
         <div
           style={{
-            ...S.filterNotice,
-            background:
-              playerSource === "registered"
+            padding: "8px 12px",
+            borderRadius: 8,
+            fontSize: 12,
+            background: useTeamMode
+              ? "rgba(255,160,80,0.07)"
+              : playerSource === "registered"
                 ? "rgba(200,255,0,0.06)"
                 : "rgba(255,255,255,0.04)",
-            borderColor:
-              playerSource === "registered"
-                ? "rgba(200,255,0,0.2)"
-                : "rgba(255,255,255,0.08)",
+            border: `1px solid ${useTeamMode ? "rgba(255,160,80,0.2)" : playerSource === "registered" ? "rgba(200,255,0,0.2)" : "rgba(255,255,255,0.08)"}`,
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
           }}
         >
-          {loadingEventPlayers ? (
-            <span style={{ color: "rgba(255,255,255,0.4)" }}>
-              Loading players…
-            </span>
+          {useTeamMode ? (
+            <>
+              <span style={{ color: "#fdba74", fontWeight: 600 }}>
+                🤝 {eventTeams.length} teams available
+              </span>
+              <span style={{ color: "rgba(255,255,255,0.4)", marginLeft: 4 }}>
+                — select a team to fill both player slots automatically
+              </span>
+            </>
+          ) : loadingEventPlayers || loadingTeams ? (
+            <span style={{ color: "rgba(255,255,255,0.4)" }}>Loading…</span>
           ) : playerSource === "registered" ? (
             <>
               <span style={{ color: "#c8ff00", fontWeight: 600 }}>
                 🎯 {playerOpts.length} registered players
               </span>
-              <span style={{ color: "rgba(255,255,255,0.4)", marginLeft: 8 }}>
+              <span style={{ color: "rgba(255,255,255,0.4)", marginLeft: 4 }}>
                 — only these players appear below
               </span>
             </>
@@ -309,7 +380,7 @@ function MatchForm({ initial, onSave, onClose }) {
               <span style={{ color: "#fbbf24", fontWeight: 600 }}>
                 ⚠ No registered players
               </span>
-              <span style={{ color: "rgba(255,255,255,0.4)", marginLeft: 8 }}>
+              <span style={{ color: "rgba(255,255,255,0.4)", marginLeft: 4 }}>
                 — showing all {playerOpts.length} players
               </span>
             </>
@@ -344,7 +415,6 @@ function MatchForm({ initial, onSave, onClose }) {
             <option value="MIXED_DOUBLES">Mixed Doubles</option>
           </Select>
         </FormField>
-
         <FormField label="Scoring format">
           <Select value={form.scoring_format} onChange={set("scoring_format")}>
             {SCORING_FORMATS.map((sf) => (
@@ -356,30 +426,88 @@ function MatchForm({ initial, onSave, onClose }) {
         </FormField>
       </div>
 
-      {/* ── Teams ── */}
-      <div style={S.teamGrid}>
-        <div style={S.teamCol}>
-          <div style={S.teamLabel}>Team 1</div>
-          <FormField label="Player 1">
-            <Select
-              value={form.player1_team1}
-              onChange={set("player1_team1")}
-              required
-            >
-              <option value="">— Select —</option>
-              {playerOpts.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                  {p.country ? ` (${p.country})` : ""}
-                </option>
-              ))}
-            </Select>
-          </FormField>
-          {isDoubles && (
-            <FormField label="Player 2">
+      {/* ── Teams / Players ── */}
+      {useTeamMode ? (
+        /* ── TEAM SELECT MODE ── */
+        <div style={S.teamGrid}>
+          <div style={S.teamCol}>
+            <div style={S.teamLabel}>Team 1</div>
+            <FormField label="Select team">
               <Select
-                value={form.player2_team1}
-                onChange={set("player2_team1")}
+                value={selectedTeam1Id}
+                onChange={(e) => handleTeam1Change(e.target.value)}
+                required
+              >
+                <option value="">— Select team —</option>
+                {eventTeams
+                  .filter((t) => String(t.id) !== String(selectedTeam2Id))
+                  .map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.name}
+                    </option>
+                  ))}
+              </Select>
+            </FormField>
+            {selectedTeam1Id &&
+              (() => {
+                const t = eventTeams.find(
+                  (t) => String(t.id) === String(selectedTeam1Id),
+                );
+                return t ? (
+                  <div style={S.teamPreview}>
+                    <span style={S.teamPreviewChip}>{t.player1_name}</span>
+                    <span style={S.teamPreviewSlash}>/</span>
+                    <span style={S.teamPreviewChip}>{t.player2_name}</span>
+                  </div>
+                ) : null;
+              })()}
+          </div>
+
+          <div style={S.vsCol}>vs</div>
+
+          <div style={S.teamCol}>
+            <div style={S.teamLabel}>Team 2</div>
+            <FormField label="Select team">
+              <Select
+                value={selectedTeam2Id}
+                onChange={(e) => handleTeam2Change(e.target.value)}
+                required
+              >
+                <option value="">— Select team —</option>
+                {eventTeams
+                  .filter((t) => String(t.id) !== String(selectedTeam1Id))
+                  .map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.name}
+                    </option>
+                  ))}
+              </Select>
+            </FormField>
+            {selectedTeam2Id &&
+              (() => {
+                const t = eventTeams.find(
+                  (t) => String(t.id) === String(selectedTeam2Id),
+                );
+                return t ? (
+                  <div style={S.teamPreview}>
+                    <span style={S.teamPreviewChip}>{t.player1_name}</span>
+                    <span style={S.teamPreviewSlash}>/</span>
+                    <span style={S.teamPreviewChip}>{t.player2_name}</span>
+                  </div>
+                ) : null;
+              })()}
+          </div>
+        </div>
+      ) : (
+        /* ── INDIVIDUAL PLAYER MODE (singles or doubles without teams) ── */
+        <div style={S.teamGrid}>
+          <div style={S.teamCol}>
+            <div style={S.teamLabel}>Team 1</div>
+            <FormField label="Player 1">
+              <Select
+                value={form.player1_team1}
+                onChange={set("player1_team1")}
+                required
               >
                 <option value="">— Select —</option>
                 {playerOpts.map((p) => (
@@ -390,33 +518,33 @@ function MatchForm({ initial, onSave, onClose }) {
                 ))}
               </Select>
             </FormField>
-          )}
-        </div>
+            {isDoubles && (
+              <FormField label="Player 2">
+                <Select
+                  value={form.player2_team1}
+                  onChange={set("player2_team1")}
+                >
+                  <option value="">— Select —</option>
+                  {playerOpts.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                      {p.country ? ` (${p.country})` : ""}
+                    </option>
+                  ))}
+                </Select>
+              </FormField>
+            )}
+          </div>
 
-        <div style={S.vsCol}>vs</div>
+          <div style={S.vsCol}>vs</div>
 
-        <div style={S.teamCol}>
-          <div style={S.teamLabel}>Team 2</div>
-          <FormField label="Player 1">
-            <Select
-              value={form.player1_team2}
-              onChange={set("player1_team2")}
-              required
-            >
-              <option value="">— Select —</option>
-              {playerOpts.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                  {p.country ? ` (${p.country})` : ""}
-                </option>
-              ))}
-            </Select>
-          </FormField>
-          {isDoubles && (
-            <FormField label="Player 2">
+          <div style={S.teamCol}>
+            <div style={S.teamLabel}>Team 2</div>
+            <FormField label="Player 1">
               <Select
-                value={form.player2_team2}
-                onChange={set("player2_team2")}
+                value={form.player1_team2}
+                onChange={set("player1_team2")}
+                required
               >
                 <option value="">— Select —</option>
                 {playerOpts.map((p) => (
@@ -427,9 +555,25 @@ function MatchForm({ initial, onSave, onClose }) {
                 ))}
               </Select>
             </FormField>
-          )}
+            {isDoubles && (
+              <FormField label="Player 2">
+                <Select
+                  value={form.player2_team2}
+                  onChange={set("player2_team2")}
+                >
+                  <option value="">— Select —</option>
+                  {playerOpts.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                      {p.country ? ` (${p.country})` : ""}
+                    </option>
+                  ))}
+                </Select>
+              </FormField>
+            )}
+          </div>
         </div>
-      </div>
+      )}
 
       {/* ── Serving player ── */}
       <FormField label="Serving player (optional)">
@@ -521,37 +665,38 @@ export default function Matches() {
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState("");
 
-  const matchArr = Array.isArray(matches) ? matches : [];
+  const arr = Array.isArray(matches) ? matches : matches?.results || [];
 
-  const filtered = matchArr.filter((m) => {
-    const text = [
-      m.player1_team1_name,
-      m.player2_team1_name,
-      m.player1_team2_name,
-      m.player2_team2_name,
-      m.event_name,
-      m.tournament_name,
-    ]
+  const filtered = arr.filter((m) => {
+    const t1 = [m.player1_team1_name, m.player2_team1_name]
       .filter(Boolean)
-      .join(" ")
-      .toLowerCase();
-    return (
-      text.includes(search.toLowerCase()) &&
-      (!filterStatus || m.status === filterStatus)
-    );
+      .join(" ");
+    const t2 = [m.player1_team2_name, m.player2_team2_name]
+      .filter(Boolean)
+      .join(" ");
+    const q = search.toLowerCase();
+    const matchSearch =
+      !q ||
+      t1.toLowerCase().includes(q) ||
+      t2.toLowerCase().includes(q) ||
+      (m.event_name || "").toLowerCase().includes(q);
+    const matchStatus = !filterStatus || m.status === filterStatus;
+    return matchSearch && matchStatus;
   });
 
   const handleDelete = async (m) => {
-    if (!confirm("Delete this match?")) return;
+    const t1 =
+      [m.player1_team1_name, m.player2_team1_name]
+        .filter(Boolean)
+        .join(" / ") || "this match";
+    if (!confirm(`Delete match: ${t1}?`)) return;
     await authFetch(`/api/matches/${m.id}/`, { method: "DELETE" });
     refresh();
   };
 
-  const counts = {
-    Live: matchArr.filter((m) => m.status === "Live").length,
-    Upcoming: matchArr.filter((m) => m.status === "Upcoming").length,
-    Completed: matchArr.filter((m) => m.status === "Completed").length,
-  };
+  const live = arr.filter((m) => m.status === "Live").length;
+  const upcoming = arr.filter((m) => m.status === "Upcoming").length;
+  const completed = arr.filter((m) => m.status === "Completed").length;
 
   return (
     <div style={S.page}>
@@ -560,111 +705,110 @@ export default function Matches() {
       <div style={S.topBar}>
         <div>
           <div style={S.title}>Matches</div>
-          <div style={S.sub}>Create and manage tournament matches</div>
+          <div style={S.sub}>Schedule and manage all tournament matches</div>
         </div>
         <button style={S.createBtn} onClick={() => setShowCreate(true)}>
           + New match
         </button>
       </div>
 
-      {/* Stats */}
-      <div style={S.statRow}>
+      {/* Summary */}
+      <div style={S.summaryRow}>
         {[
-          { label: "Total", value: matchArr.length, clr: "#fff" },
-          { label: "Live", value: counts.Live, clr: "#c8ff00" },
-          { label: "Upcoming", value: counts.Upcoming, clr: "#4af" },
-          { label: "Completed", value: counts.Completed, clr: "#888" },
-        ].map((s) => (
-          <div key={s.label} style={S.statCard}>
-            <div style={{ ...S.statVal, color: s.clr }}>{s.value}</div>
-            <div style={S.statLbl}>{s.label}</div>
+          { label: "Total", val: arr.length, clr: "#fff" },
+          { label: "Live", val: live, clr: "#c8ff00" },
+          { label: "Upcoming", val: upcoming, clr: "#4af" },
+          { label: "Completed", val: completed, clr: "#6ee7b7" },
+        ].map(({ label, val, clr }) => (
+          <div key={label} style={S.summaryPill}>
+            <span style={{ color: clr, fontWeight: 700, fontSize: 20 }}>
+              {val}
+            </span>
+            <span style={{ color: "rgba(255,255,255,0.35)", fontSize: 11 }}>
+              {label}
+            </span>
           </div>
         ))}
       </div>
 
       {/* Filters */}
-      <div style={S.filters}>
+      <div style={S.filterRow}>
         <input
           style={S.search}
-          placeholder="Search by player, event, tournament…"
+          placeholder="Search players, events…"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
-        {["", "Live", "Upcoming", "Completed"].map((st) => (
-          <button
-            key={st}
-            style={{
-              ...S.filtBtn,
-              background:
-                filterStatus === st ? "rgba(200,255,0,0.12)" : "transparent",
-              color: filterStatus === st ? "#c8ff00" : "rgba(255,255,255,0.4)",
-              border:
-                filterStatus === st
-                  ? "1px solid rgba(200,255,0,0.3)"
-                  : "1px solid rgba(255,255,255,0.1)",
-            }}
-            onClick={() => setFilterStatus(st)}
-          >
-            {st || "All"}
-          </button>
-        ))}
+        <select
+          style={S.search}
+          value={filterStatus}
+          onChange={(e) => setFilterStatus(e.target.value)}
+        >
+          <option value="">All statuses</option>
+          <option value="Live">Live</option>
+          <option value="Upcoming">Upcoming</option>
+          <option value="Completed">Completed</option>
+        </select>
       </div>
 
-      {/* Header */}
+      {/* Header row */}
       <div style={S.headerRow}>
-        {[
-          "",
-          "Teams",
-          "Event",
-          "Tournament",
-          "Type",
-          "Court",
-          "Time",
-          "",
-          "",
-        ].map((h, i) => (
-          <div key={i} style={S.headerCell}>
-            {h}
-          </div>
-        ))}
+        <div style={S.hStatus} />
+        <div style={S.hTeams}>Match</div>
+        <div style={S.hMeta}>Event</div>
+        <div style={S.hMeta}>Tournament</div>
+        <div style={S.hMeta}>Type</div>
+        <div style={S.hMeta}>Court</div>
+        <div style={S.hMeta}>Time</div>
+        <div style={S.hActions} />
       </div>
 
-      {/* List */}
       {loading ? (
         <div style={S.empty}>Loading…</div>
       ) : filtered.length === 0 ? (
-        <div style={S.empty}>No matches found.</div>
+        <div style={S.empty}>
+          {arr.length === 0
+            ? "No matches yet."
+            : "No matches match your search."}
+        </div>
       ) : (
-        filtered.map((m) => (
-          <MatchRow
-            key={m.id}
-            m={m}
-            onEdit={setEditing}
-            onDelete={handleDelete}
-          />
-        ))
+        <div style={S.list}>
+          {filtered.map((m) => (
+            <MatchRow
+              key={m.id}
+              m={m}
+              onEdit={setEditing}
+              onDelete={handleDelete}
+            />
+          ))}
+        </div>
       )}
 
-      {(showCreate || editing) && (
+      {showCreate && (
         <Modal
-          title={editing ? "Edit match" : "New match"}
-          width={720}
-          onClose={() => {
-            setShowCreate(false);
-            setEditing(null);
-          }}
+          title="New match"
+          onClose={() => setShowCreate(false)}
+          width={600}
         >
+          <MatchForm
+            onSave={() => {
+              setShowCreate(false);
+              refresh();
+            }}
+            onClose={() => setShowCreate(false)}
+          />
+        </Modal>
+      )}
+
+      {editing && (
+        <Modal title="Edit match" onClose={() => setEditing(null)} width={600}>
           <MatchForm
             initial={editing}
             onSave={() => {
-              setShowCreate(false);
               setEditing(null);
               refresh();
             }}
-            onClose={() => {
-              setShowCreate(false);
-              setEditing(null);
-            }}
+            onClose={() => setEditing(null)}
           />
         </Modal>
       )}
@@ -677,18 +821,12 @@ export default function Matches() {
 const CSS = `
   @import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=DM+Sans:wght@300;400;500;600&display=swap');
   *, *::before, *::after { box-sizing: border-box; }
-  input:focus, select:focus { outline: none; border-color: rgba(200,255,0,0.5) !important; box-shadow: 0 0 0 3px rgba(200,255,0,0.08); }
-  select option, select optgroup { background: #1a1a1a; color: #fff; }
+  input:focus, select:focus { outline: none; border-color: rgba(200,255,0,0.4) !important; }
+  button:hover { opacity: 0.85; }
 `;
 
 const S = {
-  page: {
-    display: "flex",
-    flexDirection: "column",
-    gap: 20,
-    fontFamily: "'DM Sans', sans-serif",
-    color: "#fff",
-  },
+  page: { display: "flex", flexDirection: "column", gap: 24 },
   topBar: {
     display: "flex",
     justifyContent: "space-between",
@@ -710,98 +848,84 @@ const S = {
     fontWeight: 700,
     cursor: "pointer",
   },
-
-  statRow: { display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 12 },
-  statCard: {
-    background: "#111",
-    border: "1px solid rgba(255,255,255,0.06)",
-    borderRadius: 12,
-    padding: "14px 18px",
+  summaryRow: { display: "flex", gap: 12, flexWrap: "wrap" },
+  summaryPill: {
+    background: "rgba(255,255,255,0.04)",
+    border: "1px solid rgba(255,255,255,0.07)",
+    borderRadius: 10,
+    padding: "10px 18px",
+    display: "flex",
+    flexDirection: "column",
+    gap: 2,
+    alignItems: "center",
   },
-  statVal: { fontSize: 26, fontWeight: 600 },
-  statLbl: {
-    fontSize: 11,
-    color: "rgba(255,255,255,0.35)",
-    marginTop: 2,
-    textTransform: "uppercase",
-    letterSpacing: "1px",
-  },
-
-  filters: { display: "flex", gap: 8, flexWrap: "wrap" },
+  filterRow: { display: "flex", gap: 12 },
   search: {
     background: "rgba(255,255,255,0.05)",
     border: "1px solid rgba(255,255,255,0.1)",
     borderRadius: 8,
-    padding: "9px 14px",
+    padding: "10px 14px",
     color: "#fff",
     fontSize: 13,
-    flex: 1,
-    minWidth: 200,
+    minWidth: 180,
   },
-  filtBtn: {
-    borderRadius: 8,
-    padding: "8px 16px",
-    fontSize: 12,
-    fontWeight: 600,
-    cursor: "pointer",
-  },
-
   headerRow: {
     display: "grid",
-    gridTemplateColumns: "18px 1fr 110px 130px 90px 90px 110px 60px 70px",
-    gap: 8,
-    padding: "0 12px",
-    marginBottom: -8,
+    gridTemplateColumns: "16px 2fr 1fr 1fr 1fr 1fr 1fr 80px",
+    gap: 12,
+    padding: "0 14px",
+    alignItems: "center",
   },
-  headerCell: {
-    fontSize: 10,
-    color: "rgba(255,255,255,0.2)",
+  hStatus: {},
+  hTeams: {
+    fontSize: 11,
+    color: "rgba(255,255,255,0.3)",
+    fontWeight: 600,
     textTransform: "uppercase",
-    letterSpacing: "1px",
   },
-
+  hMeta: {
+    fontSize: 11,
+    color: "rgba(255,255,255,0.3)",
+    fontWeight: 600,
+    textTransform: "uppercase",
+  },
+  hActions: {},
+  list: { display: "flex", flexDirection: "column", gap: 6 },
+  empty: {
+    color: "rgba(255,255,255,0.3)",
+    fontSize: 14,
+    padding: "48px 0",
+    textAlign: "center",
+  },
   row: {
     display: "grid",
-    gridTemplateColumns: "18px 1fr 110px 130px 90px 90px 110px 60px 70px",
-    gap: 8,
-    alignItems: "center",
+    gridTemplateColumns: "16px 2fr 1fr 1fr 1fr 1fr 1fr 80px",
+    gap: 12,
+    padding: "12px 14px",
     background: "#111",
-    border: "1px solid rgba(255,255,255,0.06)",
+    border: "1px solid rgba(255,255,255,0.07)",
     borderRadius: 10,
-    padding: "12px",
+    alignItems: "center",
   },
   statusDot: { width: 8, height: 8, borderRadius: "50%", flexShrink: 0 },
-  rowTeams: { display: "flex", alignItems: "center", gap: 6, minWidth: 0 },
-  teamName: {
-    fontSize: 13,
-    color: "#fff",
-    whiteSpace: "nowrap",
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-  },
-  rowVs: { fontSize: 11, color: "rgba(255,255,255,0.25)", flexShrink: 0 },
-  rowMeta: {
-    fontSize: 12,
-    color: "rgba(255,255,255,0.4)",
-    whiteSpace: "nowrap",
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-  },
+  rowTeams: { display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" },
+  teamName: { fontSize: 13, color: "#fff", fontWeight: 500 },
+  rowVs: { fontSize: 11, color: "rgba(255,255,255,0.3)" },
+  rowMeta: { fontSize: 12, color: "rgba(255,255,255,0.4)" },
   eventTag: {
     background: "rgba(200,255,0,0.08)",
     color: "#c8ff00",
-    borderRadius: 6,
-    padding: "2px 8px",
+    borderRadius: 4,
+    padding: "2px 7px",
     fontSize: 11,
     fontWeight: 600,
   },
   pin: {
     fontSize: 11,
-    color: "#c8ff00",
-    background: "rgba(200,255,0,0.08)",
-    borderRadius: 6,
-    padding: "3px 8px",
-    textAlign: "center",
+    color: "rgba(255,255,255,0.4)",
+    background: "rgba(255,255,255,0.05)",
+    borderRadius: 4,
+    padding: "2px 7px",
   },
   rowActions: { display: "flex", gap: 6 },
   editBtn: {
@@ -809,7 +933,7 @@ const S = {
     color: "#fff",
     border: "none",
     borderRadius: 6,
-    padding: "5px 12px",
+    padding: "5px 10px",
     fontSize: 12,
     cursor: "pointer",
   },
@@ -822,93 +946,75 @@ const S = {
     fontSize: 12,
     cursor: "pointer",
   },
-  empty: {
-    color: "rgba(255,255,255,0.2)",
-    fontSize: 14,
-    padding: "40px 0",
-    textAlign: "center",
-  },
-
-  // ── Form ──
-  errBox: {
-    background: "rgba(255,60,60,0.12)",
-    border: "1px solid rgba(255,60,60,0.25)",
-    borderRadius: 8,
-    padding: "10px 14px",
-    color: "#f87171",
-    fontSize: 13,
-  },
   cancelBtn: {
-    background: "rgba(255,255,255,0.06)",
-    color: "#fff",
-    border: "none",
+    background: "none",
+    border: "1px solid rgba(255,255,255,0.1)",
     borderRadius: 8,
-    padding: "10px 20px",
+    padding: "10px 18px",
+    color: "rgba(255,255,255,0.4)",
     fontSize: 13,
     cursor: "pointer",
   },
-  divider: { borderTop: "1px solid rgba(255,255,255,0.07)", margin: "2px 0" },
-
+  errBox: {
+    background: "rgba(255,60,60,0.1)",
+    border: "1px solid rgba(255,60,60,0.3)",
+    color: "#ff6b6b",
+    borderRadius: 8,
+    padding: "10px 14px",
+    fontSize: 13,
+  },
+  divider: { height: 1, background: "rgba(255,255,255,0.06)" },
   eventPickerBox: {
-    background: "rgba(200,255,0,0.04)",
-    border: "1px solid rgba(200,255,0,0.12)",
+    background: "rgba(255,255,255,0.03)",
+    border: "1px solid rgba(255,255,255,0.08)",
     borderRadius: 10,
     padding: "14px 16px",
     display: "flex",
     flexDirection: "column",
-    gap: 6,
+    gap: 8,
   },
   eventPickerLabel: {
     fontSize: 12,
     fontWeight: 600,
     color: "#c8ff00",
     textTransform: "uppercase",
-    letterSpacing: "0.5px",
+    letterSpacing: "0.04em",
   },
-  eventPickerSub: {
-    fontSize: 12,
-    color: "rgba(255,255,255,0.35)",
-    marginBottom: 4,
-  },
-  eventSelect: {
-    background: "rgba(0,0,0,0.3)",
-    border: "1px solid rgba(200,255,0,0.2)",
-    borderRadius: 8,
-    padding: "10px 14px",
-    color: "#fff",
-    fontSize: 13,
-    width: "100%",
-  },
-
-  filterNotice: {
-    borderRadius: 8,
-    padding: "10px 14px",
-    border: "1px solid",
-    fontSize: 13,
-  },
-
+  eventPickerSub: { fontSize: 12, color: "rgba(255,255,255,0.35)" },
   teamGrid: {
     display: "grid",
-    gridTemplateColumns: "1fr 36px 1fr",
-    gap: 8,
+    gridTemplateColumns: "1fr 28px 1fr",
+    gap: 0,
     alignItems: "start",
   },
-  teamCol: { display: "flex", flexDirection: "column", gap: 12 },
+  teamCol: { display: "flex", flexDirection: "column", gap: 10 },
   teamLabel: {
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: 700,
-    color: "rgba(255,255,255,0.3)",
+    color: "rgba(255,255,255,0.5)",
     textTransform: "uppercase",
-    letterSpacing: "1px",
-    marginBottom: 4,
+    letterSpacing: "0.05em",
+    paddingBottom: 4,
+    borderBottom: "1px solid rgba(255,255,255,0.08)",
   },
   vsCol: {
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
-    paddingTop: 36,
+    color: "rgba(255,255,255,0.2)",
     fontSize: 13,
-    color: "rgba(255,255,255,0.25)",
-    fontWeight: 700,
+    paddingTop: 28,
   },
+  // Team preview chips (shown after team selection)
+  teamPreview: {
+    display: "flex",
+    alignItems: "center",
+    gap: 6,
+    padding: "6px 10px",
+    background: "rgba(255,160,80,0.07)",
+    borderRadius: 7,
+    border: "1px solid rgba(255,160,80,0.15)",
+  },
+  teamPreviewChip: { fontSize: 12, color: "rgba(255,255,255,0.7)" },
+  teamPreviewSlash: { color: "#fdba74", fontSize: 12 },
 };

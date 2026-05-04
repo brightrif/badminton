@@ -1,8 +1,10 @@
 // src/pages/director/Events.jsx
 //
 // Manages tournament event categories.
-// NEW: Each event card has a "Players" button to manage registrations.
-//      Registered players are filtered in the match creation form.
+// - Each event card has a "Manage Players" button (unchanged).
+// - Doubles/Mixed-Doubles event cards also have a "Manage Teams" button
+//   that lets the director pair registered players into DoublesTeam records.
+//   Selecting a team in the match-creation form fills both player slots at once.
 
 import { useState, useEffect, useCallback } from "react";
 import { useDirectorApi as useApi } from "../../hooks/useDirectorApi";
@@ -117,7 +119,6 @@ function EventForm({ initial, tournaments, onSave, onClose }) {
             ))}
           </Select>
         </FormField>
-
         <FormField label="Format" hint="For your reference only">
           <Select value={form.format} onChange={set("format")}>
             {FORMATS.map((f) => (
@@ -163,7 +164,7 @@ function EventForm({ initial, tournaments, onSave, onClose }) {
 
 function PlayerRegistrationPanel({ event, onClose }) {
   const { authFetch } = useAuth();
-  const [registrations, setRegistrations] = useState([]); // { id, player, player_name, player_country }
+  const [registrations, setRegistrations] = useState([]);
   const [allPlayers, setAllPlayers] = useState([]);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
@@ -185,7 +186,7 @@ function PlayerRegistrationPanel({ event, onClose }) {
       setAllPlayers(
         Array.isArray(playersData) ? playersData : playersData.results || [],
       );
-    } catch (e) {
+    } catch {
       setError("Failed to load data.");
     } finally {
       setLoading(false);
@@ -197,7 +198,6 @@ function PlayerRegistrationPanel({ event, onClose }) {
   }, [loadData]);
 
   const registeredIds = new Set(registrations.map((r) => r.player));
-
   const unregisteredPlayers = allPlayers.filter(
     (p) =>
       !registeredIds.has(p.id) &&
@@ -229,9 +229,7 @@ function PlayerRegistrationPanel({ event, onClose }) {
     try {
       const res = await authFetch(
         `/api/event-registrations/${registrationId}/`,
-        {
-          method: "DELETE",
-        },
+        { method: "DELETE" },
       );
       if (!res.ok) throw new Error("Failed to remove player.");
       await loadData();
@@ -240,132 +238,111 @@ function PlayerRegistrationPanel({ event, onClose }) {
     }
   };
 
-  const typeClr = TYPE_CLR[event.match_type] || TYPE_CLR.SINGLE;
-
   return (
-    <div style={PR.wrap}>
-      {/* Header */}
-      <div style={PR.header}>
-        <div>
-          <div style={PR.eventName}>{event.name}</div>
-          <div style={PR.eventMeta}>
-            <span
-              style={{
-                ...PR.badge,
-                background: typeClr.bg,
-                color: typeClr.text,
-              }}
-            >
-              {MATCH_TYPES.find((m) => m.value === event.match_type)?.label ||
-                event.match_type}
-            </span>
-            <span style={PR.regCount}>{registrations.length} registered</span>
-            {registrations.length === 0 && (
-              <span style={PR.noRegNote}>
-                ⚠ No players registered — all players shown in match creation
-              </span>
-            )}
-          </div>
-        </div>
-      </div>
-
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       {error && <div style={S.errBox}>{error}</div>}
-
-      <div style={PR.columns}>
-        {/* Left: Registered players */}
-        <div style={PR.col}>
-          <div style={PR.colHead}>
-            <span style={PR.colTitle}>Registered Players</span>
-            <span style={PR.colCount}>{registrations.length}</span>
-          </div>
-          <div style={PR.playerList}>
-            {loading ? (
-              <div style={PR.emptyMsg}>Loading…</div>
-            ) : registrations.length === 0 ? (
-              <div style={PR.emptyMsg}>
-                No players registered yet. Add players from the right.
-              </div>
-            ) : (
-              registrations.map((reg) => (
-                <div key={reg.id} style={PR.playerRow}>
-                  <div style={PR.playerAvatar}>
-                    {reg.player_name?.charAt(0).toUpperCase()}
-                  </div>
-                  <div style={PR.playerInfo}>
-                    <div style={PR.playerName}>{reg.player_name}</div>
-                    {reg.player_country && (
-                      <div style={PR.playerCountry}>{reg.player_country}</div>
-                    )}
-                  </div>
-                  <button
-                    style={PR.removeBtn}
-                    onClick={() => handleRemove(reg.id)}
-                    title="Remove from event"
-                  >
-                    ✕
-                  </button>
+      {loading ? (
+        <div
+          style={{
+            color: "rgba(255,255,255,0.4)",
+            textAlign: "center",
+            padding: 32,
+          }}
+        >
+          Loading…
+        </div>
+      ) : (
+        <div style={PR.cols}>
+          {/* Registered */}
+          <div style={PR.col}>
+            <div style={PR.colHead}>
+              <span style={PR.colTitle}>Registered</span>
+              <span style={PR.colCount}>{registrations.length} players</span>
+            </div>
+            <div style={PR.playerList}>
+              {registrations.length === 0 ? (
+                <div style={PR.emptyMsg}>
+                  No players registered yet. Add players from the right.
                 </div>
-              ))
-            )}
+              ) : (
+                registrations.map((reg) => (
+                  <div key={reg.id} style={PR.playerRow}>
+                    <div style={PR.playerAvatar}>
+                      {reg.player_name?.charAt(0).toUpperCase()}
+                    </div>
+                    <div style={PR.playerInfo}>
+                      <div style={PR.playerName}>{reg.player_name}</div>
+                      {reg.player_country && (
+                        <div style={PR.playerCountry}>{reg.player_country}</div>
+                      )}
+                    </div>
+                    <button
+                      style={PR.removeBtn}
+                      onClick={() => handleRemove(reg.id)}
+                      title="Remove from event"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
+          {/* Available */}
+          <div style={PR.col}>
+            <div style={PR.colHead}>
+              <span style={PR.colTitle}>Add Players</span>
+              <span style={PR.colCount}>
+                {unregisteredPlayers.length} available
+              </span>
+            </div>
+            <input
+              style={PR.searchInput}
+              placeholder="Search players…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+            <div style={PR.playerList}>
+              {unregisteredPlayers.length === 0 ? (
+                <div style={PR.emptyMsg}>
+                  {search
+                    ? "No players match your search."
+                    : "All players are registered."}
+                </div>
+              ) : (
+                unregisteredPlayers.map((p) => (
+                  <div key={p.id} style={PR.playerRow}>
+                    <div
+                      style={{
+                        ...PR.playerAvatar,
+                        background: "rgba(255,255,255,0.06)",
+                        color: "rgba(255,255,255,0.4)",
+                      }}
+                    >
+                      {p.name?.charAt(0).toUpperCase()}
+                    </div>
+                    <div style={PR.playerInfo}>
+                      <div style={PR.playerName}>{p.name}</div>
+                      {p.country_name && (
+                        <div style={PR.playerCountry}>{p.country_name}</div>
+                      )}
+                    </div>
+                    <button
+                      style={PR.addBtn}
+                      onClick={() => handleAdd(p.id)}
+                      disabled={adding}
+                      title="Add to event"
+                    >
+                      +
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
           </div>
         </div>
-
-        {/* Right: Available players to add */}
-        <div style={PR.col}>
-          <div style={PR.colHead}>
-            <span style={PR.colTitle}>Add Players</span>
-            <span style={PR.colCount}>
-              {unregisteredPlayers.length} available
-            </span>
-          </div>
-          <input
-            style={PR.searchInput}
-            placeholder="Search players…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-          <div style={PR.playerList}>
-            {loading ? (
-              <div style={PR.emptyMsg}>Loading…</div>
-            ) : unregisteredPlayers.length === 0 ? (
-              <div style={PR.emptyMsg}>
-                {search
-                  ? "No players match your search."
-                  : "All players are registered."}
-              </div>
-            ) : (
-              unregisteredPlayers.map((p) => (
-                <div key={p.id} style={PR.playerRow}>
-                  <div
-                    style={{
-                      ...PR.playerAvatar,
-                      background: "rgba(255,255,255,0.06)",
-                      color: "rgba(255,255,255,0.4)",
-                    }}
-                  >
-                    {p.name?.charAt(0).toUpperCase()}
-                  </div>
-                  <div style={PR.playerInfo}>
-                    <div style={PR.playerName}>{p.name}</div>
-                    {p.country_name && (
-                      <div style={PR.playerCountry}>{p.country_name}</div>
-                    )}
-                  </div>
-                  <button
-                    style={PR.addBtn}
-                    onClick={() => handleAdd(p.id)}
-                    disabled={adding}
-                    title="Add to event"
-                  >
-                    +
-                  </button>
-                </div>
-              ))
-            )}
-          </div>
-        </div>
-      </div>
-
+      )}
       <div
         style={{ display: "flex", justifyContent: "flex-end", marginTop: 20 }}
       >
@@ -377,9 +354,299 @@ function PlayerRegistrationPanel({ event, onClose }) {
   );
 }
 
+// ─── Team Registration Panel (NEW) ───────────────────────────────────────────
+
+function TeamRegistrationPanel({ event, onClose }) {
+  const { authFetch } = useAuth();
+  const [teams, setTeams] = useState([]);
+  const [players, setPlayers] = useState([]); // registered players for this event
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [newTeam, setNewTeam] = useState({
+    player1: "",
+    player2: "",
+    name: "",
+  });
+
+  const loadData = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [teamsRes, playersRes] = await Promise.all([
+        authFetch(`/api/doubles-teams/?event=${event.id}`),
+        authFetch(
+          `/api/event-registrations/players_for_event/?event=${event.id}`,
+        ),
+      ]);
+      const teamsData = await teamsRes.json();
+      const playersData = await playersRes.json();
+      setTeams(Array.isArray(teamsData) ? teamsData : teamsData.results || []);
+      setPlayers(playersData.players || []);
+    } catch {
+      setError("Failed to load data.");
+    } finally {
+      setLoading(false);
+    }
+  }, [event.id, authFetch]);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
+
+  const handleCreate = async (e) => {
+    e.preventDefault();
+    if (!newTeam.player1 || !newTeam.player2) {
+      setError("Please select both players.");
+      return;
+    }
+    if (newTeam.player1 === newTeam.player2) {
+      setError("Player 1 and Player 2 must be different.");
+      return;
+    }
+    setSaving(true);
+    setError("");
+    try {
+      const payload = {
+        event: event.id,
+        player1: Number(newTeam.player1),
+        player2: Number(newTeam.player2),
+      };
+      if (newTeam.name.trim()) payload.name = newTeam.name.trim();
+
+      const res = await authFetch("/api/doubles-teams/", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) {
+        const d = await res.json();
+        throw new Error(Object.values(d).flat().join(" "));
+      }
+      setNewTeam({ player1: "", player2: "", name: "" });
+      await loadData();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async (teamId) => {
+    setError("");
+    try {
+      const res = await authFetch(`/api/doubles-teams/${teamId}/`, {
+        method: "DELETE",
+      });
+      if (!res.ok) throw new Error("Failed to remove team.");
+      await loadData();
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  // Players not yet in a team for this event
+  const usedPlayerIds = new Set(teams.flatMap((t) => [t.player1, t.player2]));
+  const availablePlayers = players; // show all registered; backend validates uniqueness
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+      {error && <div style={S.errBox}>{error}</div>}
+
+      {/* Info banner */}
+      <div style={TM.infoBanner}>
+        <span style={{ fontSize: 13, color: "rgba(255,200,0,0.8)" }}>
+          🤝 Teams created here will appear as single-select dropdowns in the
+          match creation form, automatically filling both player slots.
+        </span>
+      </div>
+
+      {/* Create new team form */}
+      <div style={TM.createBox}>
+        <div style={TM.createTitle}>Create New Team</div>
+        <form
+          onSubmit={handleCreate}
+          style={{ display: "flex", flexDirection: "column", gap: 12 }}
+        >
+          <div
+            style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}
+          >
+            {/* <FormField label="Player 1">
+              <Select
+                value={newTeam.player1}
+                onChange={(e) =>
+                  setNewTeam((f) => ({ ...f, player1: e.target.value }))
+                }
+                required
+              >
+                <option value="">— Select —</option>
+                {availablePlayers.map((p) => (
+                  <option
+                    key={p.id}
+                    value={p.id}
+                    disabled={String(p.id) === String(newTeam.player2)}
+                  >
+                    {p.name}
+                    {p.country ? ` (${p.country})` : ""}
+                  </option>
+                ))}
+              </Select>
+            </FormField> */}
+            {/* <FormField label="Player 2">
+              <Select
+                value={newTeam.player2}
+                onChange={(e) =>
+                  setNewTeam((f) => ({ ...f, player2: e.target.value }))
+                }
+                required
+              >
+                <option value="">— Select —</option>
+                {availablePlayers.map((p) => (
+                  <option
+                    key={p.id}
+                    value={p.id}
+                    disabled={String(p.id) === String(newTeam.player1)}
+                  >
+                    {p.name}
+                    {p.country ? ` (${p.country})` : ""}
+                  </option>
+                ))}
+              </Select>
+            </FormField> */}
+
+            <FormField label="Player 1">
+              <Select
+                value={newTeam.player1}
+                onChange={(e) =>
+                  setNewTeam((f) => ({ ...f, player1: e.target.value }))
+                }
+                required
+              >
+                <option value="">— Select —</option>
+                {availablePlayers
+                  .filter(
+                    (p) =>
+                      // exclude players already in a team, UNLESS they are the currently selected player2
+                      !usedPlayerIds.has(p.id) ||
+                      String(p.id) === String(newTeam.player2),
+                  )
+                  .map((p) => (
+                    <option
+                      key={p.id}
+                      value={p.id}
+                      disabled={String(p.id) === String(newTeam.player2)}
+                    >
+                      {p.name}
+                      {p.country ? ` (${p.country})` : ""}
+                    </option>
+                  ))}
+              </Select>
+            </FormField>
+
+            <FormField label="Player 2">
+              <Select
+                value={newTeam.player2}
+                onChange={(e) =>
+                  setNewTeam((f) => ({ ...f, player2: e.target.value }))
+                }
+                required
+              >
+                <option value="">— Select —</option>
+                {availablePlayers
+                  .filter(
+                    (p) =>
+                      !usedPlayerIds.has(p.id) ||
+                      String(p.id) === String(newTeam.player1),
+                  )
+                  .map((p) => (
+                    <option
+                      key={p.id}
+                      value={p.id}
+                      disabled={String(p.id) === String(newTeam.player1)}
+                    >
+                      {p.name}
+                      {p.country ? ` (${p.country})` : ""}
+                    </option>
+                  ))}
+              </Select>
+            </FormField>
+          </div>
+          <FormField
+            label="Team name (optional)"
+            hint="Leave blank to auto-generate from player names"
+          >
+            <Input
+              value={newTeam.name}
+              onChange={(e) =>
+                setNewTeam((f) => ({ ...f, name: e.target.value }))
+              }
+              placeholder="e.g. Ali / Hassan"
+            />
+          </FormField>
+          <div style={{ display: "flex", justifyContent: "flex-end" }}>
+            <SubmitBtn loading={saving}>＋ Add Team</SubmitBtn>
+          </div>
+        </form>
+      </div>
+
+      {/* Existing teams list */}
+      <div>
+        <div style={TM.listTitle}>
+          Registered Teams
+          <span style={TM.listCount}>{teams.length}</span>
+        </div>
+        {loading ? (
+          <div
+            style={{
+              color: "rgba(255,255,255,0.4)",
+              padding: 24,
+              textAlign: "center",
+            }}
+          >
+            Loading…
+          </div>
+        ) : teams.length === 0 ? (
+          <div style={TM.emptyMsg}>
+            No teams yet. Create your first team above.
+          </div>
+        ) : (
+          <div style={TM.teamList}>
+            {teams.map((t) => (
+              <div key={t.id} style={TM.teamRow}>
+                <div style={TM.teamIcon}>🤝</div>
+                <div style={TM.teamInfo}>
+                  <div style={TM.teamName}>{t.name}</div>
+                  <div style={TM.teamPlayers}>
+                    <span style={TM.playerChip}>{t.player1_name}</span>
+                    <span style={TM.slash}>/</span>
+                    <span style={TM.playerChip}>{t.player2_name}</span>
+                  </div>
+                </div>
+                <button
+                  style={TM.deleteBtn}
+                  onClick={() => handleDelete(t.id)}
+                  title="Remove team"
+                >
+                  ✕
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div
+        style={{ display: "flex", justifyContent: "flex-end", marginTop: 8 }}
+      >
+        <button style={S.cancelBtn} onClick={onClose}>
+          Done
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ─── Event card ───────────────────────────────────────────────────────────────
 
-function EventCard({ ev, onEdit, onDelete, onManagePlayers }) {
+function EventCard({ ev, onEdit, onDelete, onManagePlayers, onManageTeams }) {
   const typeClr = TYPE_CLR[ev.match_type] || TYPE_CLR.SINGLE;
   const fmtClr = FORMAT_CLR[ev.format] || FORMAT_CLR[""];
   const typeLabel =
@@ -387,16 +654,17 @@ function EventCard({ ev, onEdit, onDelete, onManagePlayers }) {
   const fmtLabel =
     FORMATS.find((f) => f.value === ev.format)?.label || "Not set";
   const regCount = ev.registered_count ?? 0;
+  const isDoubles =
+    ev.match_type === "DOUBLES" || ev.match_type === "MIXED_DOUBLES";
 
   return (
     <div style={S.card}>
       <div style={{ ...S.cardAccent, background: typeClr.text }} />
-
       <div style={S.cardBody}>
         <div style={S.cardTop}>
           <div>
             <div style={S.cardName}>{ev.name}</div>
-            <div style={S.cardTourn}>{ev.tournament_name}</div>
+            <div style={S.cardTourn}>{ev.tournament_name || "—"}</div>
           </div>
           <div style={S.cardBadges}>
             <span
@@ -408,23 +676,17 @@ function EventCard({ ev, onEdit, onDelete, onManagePlayers }) {
             >
               {typeLabel}
             </span>
-            {ev.format && (
-              <span
-                style={{
-                  ...S.badge,
-                  background: fmtClr.bg,
-                  color: fmtClr.text,
-                }}
-              >
-                {fmtLabel}
-              </span>
-            )}
+            <span
+              style={{ ...S.badge, background: fmtClr.bg, color: fmtClr.text }}
+            >
+              {fmtLabel}
+            </span>
             {ev.round_label && (
               <span
                 style={{
                   ...S.badge,
-                  background: "rgba(255,255,255,0.06)",
-                  color: "rgba(255,255,255,0.45)",
+                  background: "rgba(255,255,255,0.05)",
+                  color: "rgba(255,255,255,0.4)",
                 }}
               >
                 {ev.round_label}
@@ -433,23 +695,22 @@ function EventCard({ ev, onEdit, onDelete, onManagePlayers }) {
           </div>
         </div>
 
-        {/* Match counts */}
         <div style={S.counts}>
-          <span style={S.countItem}>
-            <span style={{ ...S.countDot, background: "#4af" }} />
-            {ev.upcoming_count} upcoming
-          </span>
-          <span style={S.countItem}>
-            <span style={{ ...S.countDot, background: "#c8ff00" }} />
-            {ev.live_count} live
-          </span>
-          <span style={S.countItem}>
-            <span style={{ ...S.countDot, background: "#888" }} />
-            {ev.completed_count} done
-          </span>
+          {[
+            { label: "Matches", val: ev.match_count || 0, color: "#888" },
+            { label: "Upcoming", val: ev.upcoming_count || 0, color: "#4af" },
+            { label: "Live", val: ev.live_count || 0, color: "#c8ff00" },
+            { label: "Done", val: ev.completed_count || 0, color: "#6ee7b7" },
+          ].map(({ label, val, color }) => (
+            <div key={label} style={S.countItem}>
+              <span style={{ ...S.countDot, background: color }} />
+              <span style={{ color }}>{val}</span>
+              <span style={{ color: "rgba(255,255,255,0.3)" }}>{label}</span>
+            </div>
+          ))}
         </div>
 
-        {/* Player registration summary */}
+        {/* Registration bar */}
         <div style={S.regBar}>
           <span style={S.regLabel}>
             {regCount > 0 ? (
@@ -465,9 +726,20 @@ function EventCard({ ev, onEdit, onDelete, onManagePlayers }) {
               </span>
             )}
           </span>
-          <button style={S.playersBtn} onClick={() => onManagePlayers(ev)}>
-            👥 Manage Players
-          </button>
+
+          <div style={{ display: "flex", gap: 8 }}>
+            {/* Manage Players (always visible) */}
+            <button style={S.playersBtn} onClick={() => onManagePlayers(ev)}>
+              👥 Manage Players
+            </button>
+
+            {/* Manage Teams (doubles / mixed only) */}
+            {isDoubles && (
+              <button style={S.teamsBtn} onClick={() => onManageTeams(ev)}>
+                🤝 Manage Teams
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
@@ -491,7 +763,8 @@ export default function Events() {
   const { data: tournaments } = useApi("/api/tournaments/");
   const [showCreate, setShowCreate] = useState(false);
   const [editing, setEditing] = useState(null);
-  const [managingEvent, setManagingEvent] = useState(null);
+  const [managingEvent, setManagingEvent] = useState(null); // players panel
+  const [teamsEvent, setTeamsEvent] = useState(null); // teams panel  NEW
   const [search, setSearch] = useState("");
   const [filterTournament, setFilterTournament] = useState("");
 
@@ -525,57 +798,62 @@ export default function Events() {
     <div style={S.page}>
       <style>{CSS}</style>
 
-      {/* Stats */}
-      <div style={S.statsRow}>
+      {/* Top bar */}
+      <div style={S.topBar}>
+        <div>
+          <div style={S.title}>Events</div>
+          <div style={S.sub}>
+            Manage tournament event categories and player registrations
+          </div>
+        </div>
+        <button style={S.createBtn} onClick={() => setShowCreate(true)}>
+          + New event
+        </button>
+      </div>
+
+      {/* Summary pills */}
+      <div style={S.summaryRow}>
         {[
-          { label: "Events", value: evArr.length },
-          { label: "Matches", value: totalMatches },
-          { label: "Upcoming", value: totalUpcoming },
-          { label: "Live now", value: totalLive },
-          { label: "Registered Players", value: totalReg },
-        ].map((s) => (
-          <div key={s.label} style={S.statCard}>
-            <div style={S.statVal}>{s.value}</div>
-            <div style={S.statLbl}>{s.label}</div>
+          { label: "Events", val: evArr.length, clr: "#c8ff00" },
+          { label: "Matches", val: totalMatches, clr: "#4af" },
+          { label: "Live now", val: totalLive, clr: "#f87171" },
+          { label: "Upcoming", val: totalUpcoming, clr: "#4af" },
+          { label: "Reg'd", val: totalReg, clr: "#6ee7b7" },
+        ].map(({ label, val, clr }) => (
+          <div key={label} style={S.summaryPill}>
+            <span style={{ color: clr, fontWeight: 700, fontSize: 20 }}>
+              {val}
+            </span>
+            <span style={{ color: "rgba(255,255,255,0.35)", fontSize: 11 }}>
+              {label}
+            </span>
           </div>
         ))}
       </div>
 
-      {/* Top bar */}
-      <div style={S.topBar}>
-        <div>
-          <div style={S.pageTitle}>Events</div>
-          <div style={S.pageSub}>
-            Event categories group matches and pre-fill match type. Register
-            players per event so only they appear in match creation.
-          </div>
-        </div>
-        <div style={S.topActions}>
-          <select
-            style={S.filterSelect}
-            value={filterTournament}
-            onChange={(e) => setFilterTournament(e.target.value)}
-          >
-            <option value="">All tournaments</option>
-            {tournArr.map((t) => (
-              <option key={t.id} value={t.id}>
-                {t.name}
-              </option>
-            ))}
-          </select>
-          <input
-            style={S.search}
-            placeholder="Search events…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-          <button style={S.createBtn} onClick={() => setShowCreate(true)}>
-            + New event
-          </button>
-        </div>
+      {/* Filters */}
+      <div style={S.filterRow}>
+        <input
+          style={S.search}
+          placeholder="Search events…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+        <select
+          style={S.search}
+          value={filterTournament}
+          onChange={(e) => setFilterTournament(e.target.value)}
+        >
+          <option value="">All tournaments</option>
+          {tournArr.map((t) => (
+            <option key={t.id} value={String(t.id)}>
+              {t.name}
+            </option>
+          ))}
+        </select>
       </div>
 
-      {/* Cards */}
+      {/* Grid */}
       {loading ? (
         <div style={S.empty}>Loading…</div>
       ) : filtered.length === 0 ? (
@@ -593,6 +871,7 @@ export default function Events() {
               onEdit={setEditing}
               onDelete={handleDelete}
               onManagePlayers={setManagingEvent}
+              onManageTeams={setTeamsEvent} // NEW
             />
           ))}
         </div>
@@ -650,6 +929,26 @@ export default function Events() {
           />
         </Modal>
       )}
+
+      {/* Team Registration modal — NEW */}
+      {teamsEvent && (
+        <Modal
+          title={`Teams — ${teamsEvent.name}`}
+          onClose={() => {
+            setTeamsEvent(null);
+            refresh();
+          }}
+          width={680}
+        >
+          <TeamRegistrationPanel
+            event={teamsEvent}
+            onClose={() => {
+              setTeamsEvent(null);
+              refresh();
+            }}
+          />
+        </Modal>
+      )}
     </div>
   );
 }
@@ -659,94 +958,65 @@ export default function Events() {
 const CSS = `
   @import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=DM+Sans:wght@300;400;500;600&display=swap');
   *, *::before, *::after { box-sizing: border-box; }
-  input:focus, select:focus { outline: none; border-color: rgba(200,255,0,0.5) !important; box-shadow: 0 0 0 3px rgba(200,255,0,0.08); }
-  select option { background: #1a1a1a; color: #fff; }
+  input:focus, select:focus { outline: none; border-color: rgba(200,255,0,0.4) !important; }
+  button:hover { opacity: 0.85; }
 `;
 
 const S = {
-  page: { fontFamily: "'DM Sans', sans-serif", color: "#fff" },
-
-  statsRow: {
-    display: "grid",
-    gridTemplateColumns: "repeat(5, 1fr)",
-    gap: 12,
-    marginBottom: 28,
-  },
-  statCard: {
-    background: "#111",
-    border: "1px solid rgba(255,255,255,0.06)",
-    borderRadius: 12,
-    padding: "16px 20px",
-  },
-  statVal: { fontSize: 26, fontWeight: 600, color: "#c8ff00" },
-  statLbl: {
-    fontSize: 11,
-    color: "rgba(255,255,255,0.35)",
-    marginTop: 2,
-    textTransform: "uppercase",
-    letterSpacing: "1px",
-  },
-
+  page: { display: "flex", flexDirection: "column", gap: 28 },
   topBar: {
     display: "flex",
-    alignItems: "flex-start",
     justifyContent: "space-between",
-    marginBottom: 24,
-    gap: 16,
-    flexWrap: "wrap",
+    alignItems: "flex-start",
   },
-  pageTitle: {
+  title: {
     fontFamily: "'DM Serif Display', serif",
     fontSize: 34,
     color: "#fff",
   },
-  pageSub: {
-    fontSize: 13,
-    color: "rgba(255,255,255,0.35)",
-    marginTop: 6,
-    maxWidth: 500,
-  },
-  topActions: {
-    display: "flex",
-    gap: 10,
-    alignItems: "center",
-    flexWrap: "wrap",
-  },
-  filterSelect: {
-    background: "rgba(255,255,255,0.05)",
-    border: "1px solid rgba(255,255,255,0.1)",
-    borderRadius: 8,
-    padding: "9px 14px",
-    color: "#fff",
-    fontSize: 13,
-  },
-  search: {
-    background: "rgba(255,255,255,0.05)",
-    border: "1px solid rgba(255,255,255,0.1)",
-    borderRadius: 8,
-    padding: "9px 14px",
-    color: "#fff",
-    fontSize: 13,
-    width: 200,
-  },
+  sub: { fontSize: 13, color: "rgba(255,255,255,0.35)", marginTop: 6 },
   createBtn: {
     background: "#c8ff00",
     color: "#0a0a0a",
     border: "none",
-    borderRadius: 8,
-    padding: "10px 18px",
+    borderRadius: 10,
+    padding: "11px 20px",
     fontSize: 13,
     fontWeight: 700,
     cursor: "pointer",
-    whiteSpace: "nowrap",
   },
-
+  summaryRow: { display: "flex", gap: 12, flexWrap: "wrap" },
+  summaryPill: {
+    background: "rgba(255,255,255,0.04)",
+    border: "1px solid rgba(255,255,255,0.07)",
+    borderRadius: 10,
+    padding: "10px 18px",
+    display: "flex",
+    flexDirection: "column",
+    gap: 2,
+    alignItems: "center",
+  },
+  filterRow: { display: "flex", gap: 12 },
+  search: {
+    background: "rgba(255,255,255,0.05)",
+    border: "1px solid rgba(255,255,255,0.1)",
+    borderRadius: 8,
+    padding: "10px 14px",
+    color: "#fff",
+    fontSize: 13,
+    minWidth: 180,
+  },
+  empty: {
+    color: "rgba(255,255,255,0.3)",
+    fontSize: 14,
+    padding: "48px 0",
+    textAlign: "center",
+  },
   grid: {
     display: "grid",
-    gridTemplateColumns: "repeat(auto-fill, minmax(340px, 1fr))",
-    gap: 12,
+    gridTemplateColumns: "repeat(auto-fill, minmax(380px, 1fr))",
+    gap: 16,
   },
-
   card: {
     background: "#111",
     border: "1px solid rgba(255,255,255,0.07)",
@@ -797,7 +1067,6 @@ const S = {
     borderRadius: "50%",
     display: "inline-block",
   },
-
   regBar: {
     display: "flex",
     alignItems: "center",
@@ -805,8 +1074,11 @@ const S = {
     marginTop: 4,
     paddingTop: 10,
     borderTop: "1px solid rgba(255,255,255,0.06)",
+    flexWrap: "wrap",
+    gap: 8,
   },
   regLabel: { fontSize: 12, color: "rgba(255,255,255,0.4)" },
+  // Manage Players button (existing style)
   playersBtn: {
     background: "rgba(200,255,0,0.08)",
     color: "#c8ff00",
@@ -817,7 +1089,17 @@ const S = {
     fontWeight: 600,
     cursor: "pointer",
   },
-
+  // Manage Teams button (NEW — orange accent to differentiate)
+  teamsBtn: {
+    background: "rgba(255,160,80,0.1)",
+    color: "#fdba74",
+    border: "1px solid rgba(255,160,80,0.25)",
+    borderRadius: 6,
+    padding: "5px 12px",
+    fontSize: 12,
+    fontWeight: 600,
+    cursor: "pointer",
+  },
   cardActions: {
     display: "flex",
     flexDirection: "column",
@@ -837,98 +1119,43 @@ const S = {
   delBtn: {
     background: "rgba(255,60,60,0.1)",
     color: "#f87171",
-    border: "none",
+    border: "1px solid rgba(255,60,60,0.2)",
     borderRadius: 6,
     padding: "6px 14px",
     fontSize: 12,
     cursor: "pointer",
   },
   cancelBtn: {
-    background: "rgba(255,255,255,0.06)",
-    color: "#fff",
-    border: "none",
+    background: "none",
+    border: "1px solid rgba(255,255,255,0.1)",
     borderRadius: 8,
-    padding: "10px 20px",
+    padding: "10px 18px",
+    color: "rgba(255,255,255,0.4)",
     fontSize: 13,
     cursor: "pointer",
   },
   errBox: {
-    background: "rgba(255,60,60,0.12)",
-    border: "1px solid rgba(255,60,60,0.25)",
+    background: "rgba(255,60,60,0.1)",
+    border: "1px solid rgba(255,60,60,0.3)",
+    color: "#ff6b6b",
     borderRadius: 8,
     padding: "10px 14px",
-    color: "#f87171",
     fontSize: 13,
   },
-
-  empty: {
-    color: "rgba(255,255,255,0.2)",
-    fontSize: 14,
-    padding: "40px 0",
-    textAlign: "center",
-  },
+  divider: { height: 1, background: "rgba(255,255,255,0.06)" },
 };
 
-// Player Registration Panel styles
+// Player panel styles
 const PR = {
-  wrap: { display: "flex", flexDirection: "column", gap: 16 },
-  header: {
-    borderBottom: "1px solid rgba(255,255,255,0.07)",
-    paddingBottom: 14,
-  },
-  eventName: { fontSize: 18, fontWeight: 600, color: "#fff" },
-  eventMeta: {
-    display: "flex",
-    alignItems: "center",
-    gap: 10,
-    marginTop: 6,
-    flexWrap: "wrap",
-  },
-  badge: {
-    fontSize: 11,
-    borderRadius: 20,
-    padding: "3px 10px",
-    fontWeight: 600,
-  },
-  regCount: { fontSize: 13, color: "rgba(255,255,255,0.4)" },
-  noRegNote: {
-    fontSize: 12,
-    color: "#fbbf24",
-    background: "rgba(251,191,36,0.08)",
-    borderRadius: 6,
-    padding: "3px 10px",
-  },
-
-  columns: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 },
-  col: {
-    background: "rgba(255,255,255,0.03)",
-    border: "1px solid rgba(255,255,255,0.07)",
-    borderRadius: 10,
-    padding: 14,
-    display: "flex",
-    flexDirection: "column",
-    gap: 10,
-  },
+  cols: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 },
+  col: { display: "flex", flexDirection: "column", gap: 10 },
   colHead: {
     display: "flex",
     justifyContent: "space-between",
     alignItems: "center",
   },
-  colTitle: {
-    fontSize: 13,
-    fontWeight: 600,
-    color: "rgba(255,255,255,0.7)",
-    textTransform: "uppercase",
-    letterSpacing: "0.5px",
-  },
-  colCount: {
-    fontSize: 11,
-    color: "rgba(255,255,255,0.3)",
-    background: "rgba(255,255,255,0.06)",
-    borderRadius: 20,
-    padding: "2px 8px",
-  },
-
+  colTitle: { fontSize: 13, fontWeight: 600, color: "#fff" },
+  colCount: { fontSize: 12, color: "rgba(255,255,255,0.35)" },
   searchInput: {
     background: "rgba(255,255,255,0.05)",
     border: "1px solid rgba(255,255,255,0.1)",
@@ -936,30 +1163,28 @@ const PR = {
     padding: "8px 12px",
     color: "#fff",
     fontSize: 13,
-    width: "100%",
   },
-
   playerList: {
     display: "flex",
     flexDirection: "column",
-    gap: 4,
-    maxHeight: 320,
+    gap: 6,
+    maxHeight: 340,
     overflowY: "auto",
   },
   playerRow: {
     display: "flex",
     alignItems: "center",
     gap: 10,
-    padding: "8px 6px",
-    borderRadius: 7,
-    background: "rgba(255,255,255,0.02)",
-    border: "1px solid rgba(255,255,255,0.04)",
+    padding: "8px 10px",
+    background: "rgba(255,255,255,0.03)",
+    borderRadius: 8,
+    border: "1px solid rgba(255,255,255,0.06)",
   },
   playerAvatar: {
     width: 32,
     height: 32,
     borderRadius: "50%",
-    background: "rgba(200,255,0,0.15)",
+    background: "rgba(200,255,0,0.1)",
     color: "#c8ff00",
     display: "flex",
     alignItems: "center",
@@ -968,52 +1193,111 @@ const PR = {
     fontSize: 13,
     flexShrink: 0,
   },
-  playerInfo: { flex: 1, minWidth: 0 },
-  playerName: {
-    fontSize: 13,
-    color: "#fff",
-    whiteSpace: "nowrap",
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-  },
-  playerCountry: {
-    fontSize: 11,
-    color: "rgba(255,255,255,0.35)",
-    marginTop: 1,
-  },
-
-  addBtn: {
-    background: "rgba(200,255,0,0.12)",
-    color: "#c8ff00",
-    border: "1px solid rgba(200,255,0,0.2)",
-    borderRadius: 6,
-    width: 28,
-    height: 28,
-    cursor: "pointer",
-    fontSize: 16,
-    fontWeight: 700,
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    flexShrink: 0,
-  },
+  playerInfo: { flex: 1 },
+  playerName: { fontSize: 13, color: "#fff", fontWeight: 500 },
+  playerCountry: { fontSize: 11, color: "rgba(255,255,255,0.35)" },
   removeBtn: {
     background: "rgba(255,60,60,0.1)",
     color: "#f87171",
     border: "none",
-    borderRadius: 6,
+    borderRadius: 5,
+    width: 26,
+    height: 26,
+    cursor: "pointer",
+    fontSize: 12,
+  },
+  addBtn: {
+    background: "rgba(200,255,0,0.12)",
+    color: "#c8ff00",
+    border: "none",
+    borderRadius: 5,
+    width: 26,
+    height: 26,
+    cursor: "pointer",
+    fontSize: 16,
+    fontWeight: 700,
+  },
+  emptyMsg: {
+    color: "rgba(255,255,255,0.25)",
+    fontSize: 13,
+    padding: "16px 0",
+    textAlign: "center",
+  },
+};
+
+// Team panel styles (NEW)
+const TM = {
+  infoBanner: {
+    background: "rgba(255,200,0,0.06)",
+    border: "1px solid rgba(255,200,0,0.15)",
+    borderRadius: 8,
+    padding: "10px 14px",
+  },
+  createBox: {
+    background: "rgba(255,255,255,0.03)",
+    border: "1px solid rgba(255,255,255,0.08)",
+    borderRadius: 10,
+    padding: "16px 18px",
+  },
+  createTitle: {
+    fontSize: 13,
+    fontWeight: 600,
+    color: "#fff",
+    marginBottom: 12,
+  },
+  listTitle: {
+    fontSize: 13,
+    fontWeight: 600,
+    color: "#fff",
+    marginBottom: 10,
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+  },
+  listCount: {
+    background: "rgba(255,160,80,0.15)",
+    color: "#fdba74",
+    borderRadius: 20,
+    padding: "2px 8px",
+    fontSize: 11,
+    fontWeight: 700,
+  },
+  teamList: { display: "flex", flexDirection: "column", gap: 8 },
+  teamRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: 12,
+    padding: "10px 14px",
+    background: "rgba(255,255,255,0.03)",
+    borderRadius: 9,
+    border: "1px solid rgba(255,255,255,0.07)",
+  },
+  teamIcon: { fontSize: 18, flexShrink: 0 },
+  teamInfo: { flex: 1 },
+  teamName: { fontSize: 14, fontWeight: 600, color: "#fff" },
+  teamPlayers: { display: "flex", alignItems: "center", gap: 6, marginTop: 3 },
+  playerChip: {
+    fontSize: 11,
+    color: "rgba(255,255,255,0.55)",
+    background: "rgba(255,255,255,0.06)",
+    borderRadius: 4,
+    padding: "2px 7px",
+  },
+  slash: { color: "rgba(255,160,80,0.6)", fontSize: 12 },
+  deleteBtn: {
+    background: "rgba(255,60,60,0.1)",
+    color: "#f87171",
+    border: "none",
+    borderRadius: 5,
     width: 28,
     height: 28,
     cursor: "pointer",
-    fontSize: 12,
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
+    fontSize: 13,
     flexShrink: 0,
   },
   emptyMsg: {
-    fontSize: 13,
     color: "rgba(255,255,255,0.25)",
+    fontSize: 13,
     padding: "20px 0",
     textAlign: "center",
   },

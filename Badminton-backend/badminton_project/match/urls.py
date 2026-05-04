@@ -8,6 +8,7 @@ from django.conf.urls.static import static
 from . import views
 from .event_views import TournamentEventViewSet
 from .event_registration import EventRegistrationViewSet
+from .doubles_team import DoublesTeamViewSet
 
 router = DefaultRouter()
 
@@ -25,6 +26,7 @@ router.register(r'tournament-venues', views.TournamentVenueViewSet, basename='to
 # ── New: bracket system ───────────────────────────────────────────────────────
 router.register(r'events',         TournamentEventViewSet, basename='event')
 router.register(r'event-registrations', EventRegistrationViewSet, basename='event-registration')
+router.register(r'doubles-teams', DoublesTeamViewSet, basename='doubles-team')
 
 app_name = 'badminton'
 
