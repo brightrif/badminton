@@ -2,6 +2,7 @@ from django.contrib import admin
 from django.utils.html import format_html
 from .models import Tournament, Player,Sponsor,Match # Import your models here
 from .event_models import TournamentEvent
+from .event_registration import EventRegistration
 # Register your models here.
 admin.site.site_header = "Badminton Tournament Management"
 admin.site.site_title = "Badminton Admin"  
@@ -10,7 +11,7 @@ admin.site.register (
         # Add your models here
         # Example: Player, Tournament, Match, etc.
          Tournament,
-         Match,TournamentEvent
+         Match,TournamentEvent,EventRegistration
     ]
 )
 

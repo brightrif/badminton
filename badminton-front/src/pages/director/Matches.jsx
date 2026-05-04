@@ -1,8 +1,6 @@
 // src/pages/director/Matches.jsx
-// Updated — adds Event selector that pre-fills match_type automatically.
-// Everything else (player selection, court, time, PIN) remains manual.
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useDirectorApi as useApi } from "../../hooks/useDirectorApi";
 import { useAuth } from "../../context/AuthContext";
 import Modal, {
@@ -13,6 +11,13 @@ import Modal, {
 } from "../../components/Modal";
 
 const STATUS_CLR = { Live: "#c8ff00", Completed: "#888", Upcoming: "#4af" };
+
+const SCORING_FORMATS = [
+  { value: "21_WITH_SET", label: "21 pts — settings to 30" },
+  { value: "21_NO_SET", label: "21 pts — no settings" },
+  { value: "15_WITH_SET", label: "15 pts — settings to 21" },
+  { value: "15_NO_SET", label: "15 pts — no settings" },
+];
 
 // ─── Match row ────────────────────────────────────────────────────────────────
 
@@ -55,7 +60,7 @@ function MatchRow({ m, onEdit, onDelete }) {
         )}
       </div>
       <div style={S.rowMeta}>{m.tournament_name}</div>
-      <div style={S.rowMeta}>{m.match_type?.replace("_", " ")}</div>
+      <div style={S.rowMeta}>{m.match_type?.replace(/_/g, " ")}</div>
       <div style={S.rowMeta}>{m.court_name || m.venue_name || "—"}</div>
       <div style={S.rowMeta}>{time}</div>
       {m.umpire_pin && (
@@ -80,7 +85,7 @@ function MatchRow({ m, onEdit, onDelete }) {
 function MatchForm({ initial, onSave, onClose }) {
   const { authFetch } = useAuth();
   const { data: tournaments } = useApi("/api/tournaments/");
-  const { data: players } = useApi("/api/players/");
+  const { data: allPlayers } = useApi("/api/players/");
   const { data: venues } = useApi("/api/venues/");
   const { data: courts } = useApi("/api/courts/");
   const { data: allEvents } = useApi("/api/events/");
@@ -89,6 +94,7 @@ function MatchForm({ initial, onSave, onClose }) {
     tournament: initial?.tournament || "",
     event: initial?.event || "",
     match_type: initial?.match_type || "SINGLE",
+    scoring_format: initial?.scoring_format || "21_WITH_SET",
     player1_team1: initial?.player1_team1 || "",
     player2_team1: initial?.player2_team1 || "",
     player1_team2: initial?.player1_team2 || "",
@@ -104,9 +110,42 @@ function MatchForm({ initial, onSave, onClose }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
+  // ── Registered players for the selected event ─────────────────────────────
+  const [eventPlayers, setEventPlayers] = useState(null);
+  const [loadingEventPlayers, setLoadingEventPlayers] = useState(false);
+  const [playerSource, setPlayerSource] = useState("all");
+
+  const loadEventPlayers = useCallback(
+    async (eventId) => {
+      if (!eventId) {
+        setEventPlayers(null);
+        setPlayerSource("all");
+        return;
+      }
+      setLoadingEventPlayers(true);
+      try {
+        const res = await authFetch(
+          `/api/event-registrations/players_for_event/?event=${eventId}`,
+        );
+        const data = await res.json();
+        setEventPlayers(data.players || []);
+        setPlayerSource(data.source || "all");
+      } catch {
+        setEventPlayers(null);
+        setPlayerSource("all");
+      } finally {
+        setLoadingEventPlayers(false);
+      }
+    },
+    [authFetch],
+  );
+
+  useEffect(() => {
+    loadEventPlayers(form.event);
+  }, [form.event, loadEventPlayers]);
+
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
 
-  // When an event is selected → auto-fill tournament and match_type
   const handleEventChange = (e) => {
     const eventId = e.target.value;
     const evArr = Array.isArray(allEvents) ? allEvents : [];
@@ -116,10 +155,14 @@ function MatchForm({ initial, onSave, onClose }) {
       event: eventId,
       match_type: chosen ? chosen.match_type : f.match_type,
       tournament: chosen ? String(chosen.tournament) : f.tournament,
+      player1_team1: "",
+      player2_team1: "",
+      player1_team2: "",
+      player2_team2: "",
+      server: "",
     }));
   };
 
-  // When tournament changes → clear event if it doesn't belong to new tournament
   const handleTournamentChange = (e) => {
     const tournId = e.target.value;
     const evArr = Array.isArray(allEvents) ? allEvents : [];
@@ -135,16 +178,17 @@ function MatchForm({ initial, onSave, onClose }) {
   };
 
   const isDoubles = form.match_type !== "SINGLE";
-  const playerOpts = Array.isArray(players) ? players : [];
   const tournOpts = Array.isArray(tournaments) ? tournaments : [];
   const venueOpts = Array.isArray(venues) ? venues : [];
   const courtOpts = Array.isArray(courts) ? courts : [];
   const evArr = Array.isArray(allEvents) ? allEvents : [];
 
-  // Events filtered to selected tournament
-  const eventOpts = form.tournament
-    ? evArr.filter((ev) => String(ev.tournament) === String(form.tournament))
-    : evArr;
+  const playerOpts =
+    eventPlayers !== null
+      ? eventPlayers
+      : Array.isArray(allPlayers)
+        ? allPlayers
+        : [];
 
   const activePlayers = [
     form.player1_team1,
@@ -163,6 +207,7 @@ function MatchForm({ initial, onSave, onClose }) {
     const payload = {
       tournament: Number(form.tournament),
       match_type: form.match_type,
+      scoring_format: form.scoring_format,
       player1_team1: Number(form.player1_team1),
       player1_team2: Number(form.player1_team2),
       scheduled_time: form.scheduled_time,
@@ -199,12 +244,12 @@ function MatchForm({ initial, onSave, onClose }) {
     >
       {error && <div style={S.errBox}>{error}</div>}
 
-      {/* ── Event picker (top of form — drives everything below) ── */}
+      {/* ── Event picker ── */}
       <div style={S.eventPickerBox}>
         <div style={S.eventPickerLabel}>Event category</div>
         <div style={S.eventPickerSub}>
-          Selecting an event pre-fills the tournament and match type
-          automatically.
+          Selecting an event pre-fills the tournament, match type, and filters
+          the player list.
         </div>
         <select
           style={S.eventSelect}
@@ -212,7 +257,6 @@ function MatchForm({ initial, onSave, onClose }) {
           onChange={handleEventChange}
         >
           <option value="">— No event / pick manually —</option>
-          {/* Group by tournament name */}
           {tournOpts.map((t) => {
             const tEvents = evArr.filter(
               (ev) => String(ev.tournament) === String(t.id),
@@ -232,29 +276,82 @@ function MatchForm({ initial, onSave, onClose }) {
         </select>
       </div>
 
+      {/* ── Player filter notice ── */}
+      {form.event && (
+        <div
+          style={{
+            ...S.filterNotice,
+            background:
+              playerSource === "registered"
+                ? "rgba(200,255,0,0.06)"
+                : "rgba(255,255,255,0.04)",
+            borderColor:
+              playerSource === "registered"
+                ? "rgba(200,255,0,0.2)"
+                : "rgba(255,255,255,0.08)",
+          }}
+        >
+          {loadingEventPlayers ? (
+            <span style={{ color: "rgba(255,255,255,0.4)" }}>
+              Loading players…
+            </span>
+          ) : playerSource === "registered" ? (
+            <>
+              <span style={{ color: "#c8ff00", fontWeight: 600 }}>
+                🎯 {playerOpts.length} registered players
+              </span>
+              <span style={{ color: "rgba(255,255,255,0.4)", marginLeft: 8 }}>
+                — only these players appear below
+              </span>
+            </>
+          ) : (
+            <>
+              <span style={{ color: "#fbbf24", fontWeight: 600 }}>
+                ⚠ No registered players
+              </span>
+              <span style={{ color: "rgba(255,255,255,0.4)", marginLeft: 8 }}>
+                — showing all {playerOpts.length} players
+              </span>
+            </>
+          )}
+        </div>
+      )}
+
       <div style={S.divider} />
 
-      {/* ── Tournament + match type (auto-filled, still editable) ── */}
+      {/* ── Tournament ── */}
+      <FormField label="Tournament">
+        <Select
+          value={form.tournament}
+          onChange={handleTournamentChange}
+          required
+        >
+          <option value="">— Select —</option>
+          {tournOpts.map((t) => (
+            <option key={t.id} value={t.id}>
+              {t.name}
+            </option>
+          ))}
+        </Select>
+      </FormField>
+
+      {/* ── Match type + Scoring format ── */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-        <FormField label="Tournament">
-          <Select
-            value={form.tournament}
-            onChange={handleTournamentChange}
-            required
-          >
-            <option value="">— Select —</option>
-            {tournOpts.map((t) => (
-              <option key={t.id} value={t.id}>
-                {t.name}
-              </option>
-            ))}
-          </Select>
-        </FormField>
         <FormField label="Match type">
           <Select value={form.match_type} onChange={set("match_type")}>
             <option value="SINGLE">Singles</option>
             <option value="DOUBLES">Doubles</option>
             <option value="MIXED_DOUBLES">Mixed Doubles</option>
+          </Select>
+        </FormField>
+
+        <FormField label="Scoring format">
+          <Select value={form.scoring_format} onChange={set("scoring_format")}>
+            {SCORING_FORMATS.map((sf) => (
+              <option key={sf.value} value={sf.value}>
+                {sf.label}
+              </option>
+            ))}
           </Select>
         </FormField>
       </div>
@@ -273,6 +370,7 @@ function MatchForm({ initial, onSave, onClose }) {
               {playerOpts.map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.name}
+                  {p.country ? ` (${p.country})` : ""}
                 </option>
               ))}
             </Select>
@@ -287,13 +385,16 @@ function MatchForm({ initial, onSave, onClose }) {
                 {playerOpts.map((p) => (
                   <option key={p.id} value={p.id}>
                     {p.name}
+                    {p.country ? ` (${p.country})` : ""}
                   </option>
                 ))}
               </Select>
             </FormField>
           )}
         </div>
+
         <div style={S.vsCol}>vs</div>
+
         <div style={S.teamCol}>
           <div style={S.teamLabel}>Team 2</div>
           <FormField label="Player 1">
@@ -306,6 +407,7 @@ function MatchForm({ initial, onSave, onClose }) {
               {playerOpts.map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.name}
+                  {p.country ? ` (${p.country})` : ""}
                 </option>
               ))}
             </Select>
@@ -320,6 +422,7 @@ function MatchForm({ initial, onSave, onClose }) {
                 {playerOpts.map((p) => (
                   <option key={p.id} value={p.id}>
                     {p.name}
+                    {p.country ? ` (${p.country})` : ""}
                   </option>
                 ))}
               </Select>
@@ -328,23 +431,25 @@ function MatchForm({ initial, onSave, onClose }) {
         </div>
       </div>
 
-      {/* ── Serving, venue, court ── */}
-      <div
-        style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16 }}
-      >
-        <FormField label="Serving player">
-          <Select value={form.server} onChange={set("server")}>
-            <option value="">— Select —</option>
-            {activePlayers.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-          </Select>
-        </FormField>
+      {/* ── Serving player ── */}
+      <FormField label="Serving player (optional)">
+        <Select value={form.server} onChange={set("server")}>
+          <option value="">— Select —</option>
+          {activePlayers.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.name}
+            </option>
+          ))}
+        </Select>
+      </FormField>
+
+      <div style={S.divider} />
+
+      {/* ── Venue + Court ── */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
         <FormField label="Venue">
           <Select value={form.venue} onChange={set("venue")}>
-            <option value="">— None —</option>
+            <option value="">— Select —</option>
             {venueOpts.map((v) => (
               <option key={v.id} value={v.id}>
                 {v.name}
@@ -354,17 +459,21 @@ function MatchForm({ initial, onSave, onClose }) {
         </FormField>
         <FormField label="Court">
           <Select value={form.court} onChange={set("court")}>
-            <option value="">— None —</option>
-            {courtOpts.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
+            <option value="">— Select —</option>
+            {courtOpts
+              .filter(
+                (c) => !form.venue || String(c.venue) === String(form.venue),
+              )
+              .map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
           </Select>
         </FormField>
       </div>
 
-      {/* ── Time + status ── */}
+      {/* ── Time + Status ── */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
         <FormField label="Scheduled time">
           <Input
@@ -406,13 +515,31 @@ function MatchForm({ initial, onSave, onClose }) {
 
 export default function Matches() {
   const { authFetch } = useAuth();
-  const [filter, setFilter] = useState("all");
-  const [search, setSearch] = useState("");
+  const { data: matches, loading, refresh } = useApi("/api/matches/");
   const [showCreate, setShowCreate] = useState(false);
   const [editing, setEditing] = useState(null);
+  const [search, setSearch] = useState("");
+  const [filterStatus, setFilterStatus] = useState("");
 
-  const url = filter === "all" ? "/api/matches/" : `/api/matches/${filter}/`;
-  const { data, loading, refresh } = useApi(url, [filter]);
+  const matchArr = Array.isArray(matches) ? matches : [];
+
+  const filtered = matchArr.filter((m) => {
+    const text = [
+      m.player1_team1_name,
+      m.player2_team1_name,
+      m.player1_team2_name,
+      m.player2_team2_name,
+      m.event_name,
+      m.tournament_name,
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase();
+    return (
+      text.includes(search.toLowerCase()) &&
+      (!filterStatus || m.status === filterStatus)
+    );
+  });
 
   const handleDelete = async (m) => {
     if (!confirm("Delete this match?")) return;
@@ -420,17 +547,11 @@ export default function Matches() {
     refresh();
   };
 
-  const matches = (Array.isArray(data) ? data : []).filter(
-    (m) =>
-      !search || JSON.stringify(m).toLowerCase().includes(search.toLowerCase()),
-  );
-
-  const FILTERS = [
-    { key: "all", label: "All" },
-    { key: "live", label: "Live" },
-    { key: "upcoming", label: "Upcoming" },
-    { key: "today", label: "Today" },
-  ];
+  const counts = {
+    Live: matchArr.filter((m) => m.status === "Live").length,
+    Upcoming: matchArr.filter((m) => m.status === "Upcoming").length,
+    Completed: matchArr.filter((m) => m.status === "Completed").length,
+  };
 
   return (
     <div style={S.page}>
@@ -439,65 +560,89 @@ export default function Matches() {
       <div style={S.topBar}>
         <div>
           <div style={S.title}>Matches</div>
-          <div style={S.sub}>
-            {matches.length} match{matches.length !== 1 ? "es" : ""}
-          </div>
+          <div style={S.sub}>Create and manage tournament matches</div>
         </div>
-        <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
-          <input
-            style={S.search}
-            placeholder="Search…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-          <button style={S.createBtn} onClick={() => setShowCreate(true)}>
-            + New match
-          </button>
-        </div>
+        <button style={S.createBtn} onClick={() => setShowCreate(true)}>
+          + New match
+        </button>
       </div>
 
+      {/* Stats */}
+      <div style={S.statRow}>
+        {[
+          { label: "Total", value: matchArr.length, clr: "#fff" },
+          { label: "Live", value: counts.Live, clr: "#c8ff00" },
+          { label: "Upcoming", value: counts.Upcoming, clr: "#4af" },
+          { label: "Completed", value: counts.Completed, clr: "#888" },
+        ].map((s) => (
+          <div key={s.label} style={S.statCard}>
+            <div style={{ ...S.statVal, color: s.clr }}>{s.value}</div>
+            <div style={S.statLbl}>{s.label}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Filters */}
       <div style={S.filters}>
-        {FILTERS.map((f) => (
+        <input
+          style={S.search}
+          placeholder="Search by player, event, tournament…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+        {["", "Live", "Upcoming", "Completed"].map((st) => (
           <button
-            key={f.key}
+            key={st}
             style={{
-              ...S.filterBtn,
-              ...(filter === f.key ? S.filterActive : {}),
+              ...S.filtBtn,
+              background:
+                filterStatus === st ? "rgba(200,255,0,0.12)" : "transparent",
+              color: filterStatus === st ? "#c8ff00" : "rgba(255,255,255,0.4)",
+              border:
+                filterStatus === st
+                  ? "1px solid rgba(200,255,0,0.3)"
+                  : "1px solid rgba(255,255,255,0.1)",
             }}
-            onClick={() => setFilter(f.key)}
+            onClick={() => setFilterStatus(st)}
           >
-            {f.label}
+            {st || "All"}
           </button>
         ))}
       </div>
 
-      {loading ? (
-        <div style={S.loading}>Loading…</div>
-      ) : (
-        <div style={S.table}>
-          <div style={S.tableHead}>
-            <span>Match</span>
-            <span>Event</span>
-            <span>Tournament</span>
-            <span>Type</span>
-            <span>Court</span>
-            <span>Time</span>
-            <span>PIN</span>
-            <span />
+      {/* Header */}
+      <div style={S.headerRow}>
+        {[
+          "",
+          "Teams",
+          "Event",
+          "Tournament",
+          "Type",
+          "Court",
+          "Time",
+          "",
+          "",
+        ].map((h, i) => (
+          <div key={i} style={S.headerCell}>
+            {h}
           </div>
-          {matches.length === 0 ? (
-            <div style={S.empty}>No matches found.</div>
-          ) : (
-            matches.map((m) => (
-              <MatchRow
-                key={m.id}
-                m={m}
-                onEdit={setEditing}
-                onDelete={handleDelete}
-              />
-            ))
-          )}
-        </div>
+        ))}
+      </div>
+
+      {/* List */}
+      {loading ? (
+        <div style={S.empty}>Loading…</div>
+      ) : filtered.length === 0 ? (
+        <div style={S.empty}>No matches found.</div>
+      ) : (
+        filtered.map((m) => (
+          <MatchRow
+            key={m.id}
+            m={m}
+            onEdit={setEditing}
+            onDelete={handleDelete}
+          />
+        ))
       )}
 
       {(showCreate || editing) && (
@@ -540,7 +685,7 @@ const S = {
   page: {
     display: "flex",
     flexDirection: "column",
-    gap: 24,
+    gap: 20,
     fontFamily: "'DM Sans', sans-serif",
     color: "#fff",
   },
@@ -555,15 +700,6 @@ const S = {
     color: "#fff",
   },
   sub: { fontSize: 13, color: "rgba(255,255,255,0.35)", marginTop: 6 },
-  search: {
-    background: "rgba(255,255,255,0.05)",
-    border: "1px solid rgba(255,255,255,0.1)",
-    borderRadius: 8,
-    padding: "10px 14px",
-    color: "#fff",
-    fontSize: 13,
-    width: 200,
-  },
   createBtn: {
     background: "#c8ff00",
     color: "#0a0a0a",
@@ -575,114 +711,185 @@ const S = {
     cursor: "pointer",
   },
 
-  filters: { display: "flex", gap: 8 },
-  filterBtn: {
-    background: "rgba(255,255,255,0.05)",
-    border: "1px solid rgba(255,255,255,0.08)",
-    borderRadius: 8,
-    padding: "8px 16px",
-    color: "rgba(255,255,255,0.45)",
-    fontSize: 13,
-    cursor: "pointer",
-  },
-  filterActive: {
-    background: "rgba(200,255,0,0.1)",
-    borderColor: "rgba(200,255,0,0.3)",
-    color: "#c8ff00",
-  },
-
-  loading: { color: "rgba(255,255,255,0.3)", fontSize: 14 },
-  empty: { color: "rgba(255,255,255,0.2)", fontSize: 13, padding: "24px 0" },
-
-  table: {
+  statRow: { display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 12 },
+  statCard: {
     background: "#111",
     border: "1px solid rgba(255,255,255,0.06)",
-    borderRadius: 14,
-    overflow: "hidden",
+    borderRadius: 12,
+    padding: "14px 18px",
   },
-  tableHead: {
-    display: "grid",
-    gridTemplateColumns: "2fr 1fr 1fr 1fr 1fr 1fr 70px 80px",
-    gap: 8,
-    padding: "12px 20px",
+  statVal: { fontSize: 26, fontWeight: 600 },
+  statLbl: {
     fontSize: 11,
-    color: "rgba(255,255,255,0.3)",
-    letterSpacing: "1px",
+    color: "rgba(255,255,255,0.35)",
+    marginTop: 2,
     textTransform: "uppercase",
-    borderBottom: "1px solid rgba(255,255,255,0.06)",
+    letterSpacing: "1px",
   },
+
+  filters: { display: "flex", gap: 8, flexWrap: "wrap" },
+  search: {
+    background: "rgba(255,255,255,0.05)",
+    border: "1px solid rgba(255,255,255,0.1)",
+    borderRadius: 8,
+    padding: "9px 14px",
+    color: "#fff",
+    fontSize: 13,
+    flex: 1,
+    minWidth: 200,
+  },
+  filtBtn: {
+    borderRadius: 8,
+    padding: "8px 16px",
+    fontSize: 12,
+    fontWeight: 600,
+    cursor: "pointer",
+  },
+
+  headerRow: {
+    display: "grid",
+    gridTemplateColumns: "18px 1fr 110px 130px 90px 90px 110px 60px 70px",
+    gap: 8,
+    padding: "0 12px",
+    marginBottom: -8,
+  },
+  headerCell: {
+    fontSize: 10,
+    color: "rgba(255,255,255,0.2)",
+    textTransform: "uppercase",
+    letterSpacing: "1px",
+  },
+
   row: {
     display: "grid",
-    gridTemplateColumns: "2fr 1fr 1fr 1fr 1fr 1fr 70px 80px",
+    gridTemplateColumns: "18px 1fr 110px 130px 90px 90px 110px 60px 70px",
     gap: 8,
-    padding: "14px 20px",
     alignItems: "center",
-    borderBottom: "1px solid rgba(255,255,255,0.04)",
+    background: "#111",
+    border: "1px solid rgba(255,255,255,0.06)",
+    borderRadius: 10,
+    padding: "12px",
   },
-  statusDot: { width: 8, height: 8, borderRadius: "50%", position: "absolute" },
-  rowTeams: { display: "flex", alignItems: "center", gap: 6 },
-  teamName: { fontSize: 13, color: "#fff", fontWeight: 500 },
-  rowVs: { fontSize: 11, color: "rgba(255,255,255,0.25)" },
-  rowMeta: { fontSize: 12, color: "rgba(255,255,255,0.4)" },
+  statusDot: { width: 8, height: 8, borderRadius: "50%", flexShrink: 0 },
+  rowTeams: { display: "flex", alignItems: "center", gap: 6, minWidth: 0 },
+  teamName: {
+    fontSize: 13,
+    color: "#fff",
+    whiteSpace: "nowrap",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+  },
+  rowVs: { fontSize: 11, color: "rgba(255,255,255,0.25)", flexShrink: 0 },
+  rowMeta: {
+    fontSize: 12,
+    color: "rgba(255,255,255,0.4)",
+    whiteSpace: "nowrap",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+  },
   eventTag: {
-    fontSize: 11,
     background: "rgba(200,255,0,0.08)",
     color: "#c8ff00",
+    borderRadius: 6,
     padding: "2px 8px",
-    borderRadius: 10,
-    border: "1px solid rgba(200,255,0,0.2)",
+    fontSize: 11,
+    fontWeight: 600,
   },
-  pin: { fontSize: 11, color: "rgba(255,255,255,0.35)" },
+  pin: {
+    fontSize: 11,
+    color: "#c8ff00",
+    background: "rgba(200,255,0,0.08)",
+    borderRadius: 6,
+    padding: "3px 8px",
+    textAlign: "center",
+  },
   rowActions: { display: "flex", gap: 6 },
   editBtn: {
     background: "rgba(255,255,255,0.06)",
-    border: "1px solid rgba(255,255,255,0.1)",
+    color: "#fff",
+    border: "none",
     borderRadius: 6,
     padding: "5px 12px",
-    color: "rgba(255,255,255,0.7)",
     fontSize: 12,
     cursor: "pointer",
   },
   delBtn: {
-    background: "none",
+    background: "rgba(255,60,60,0.1)",
+    color: "#f87171",
     border: "none",
-    color: "rgba(255,80,80,0.5)",
-    fontSize: 16,
+    borderRadius: 6,
+    padding: "5px 10px",
+    fontSize: 12,
     cursor: "pointer",
-    padding: "4px 8px",
+  },
+  empty: {
+    color: "rgba(255,255,255,0.2)",
+    fontSize: 14,
+    padding: "40px 0",
+    textAlign: "center",
   },
 
-  // Form
+  // ── Form ──
+  errBox: {
+    background: "rgba(255,60,60,0.12)",
+    border: "1px solid rgba(255,60,60,0.25)",
+    borderRadius: 8,
+    padding: "10px 14px",
+    color: "#f87171",
+    fontSize: 13,
+  },
+  cancelBtn: {
+    background: "rgba(255,255,255,0.06)",
+    color: "#fff",
+    border: "none",
+    borderRadius: 8,
+    padding: "10px 20px",
+    fontSize: 13,
+    cursor: "pointer",
+  },
+  divider: { borderTop: "1px solid rgba(255,255,255,0.07)", margin: "2px 0" },
+
   eventPickerBox: {
     background: "rgba(200,255,0,0.04)",
-    border: "1px solid rgba(200,255,0,0.15)",
+    border: "1px solid rgba(200,255,0,0.12)",
     borderRadius: 10,
     padding: "14px 16px",
+    display: "flex",
+    flexDirection: "column",
+    gap: 6,
   },
   eventPickerLabel: {
     fontSize: 12,
     fontWeight: 600,
     color: "#c8ff00",
-    marginBottom: 4,
+    textTransform: "uppercase",
+    letterSpacing: "0.5px",
   },
   eventPickerSub: {
-    fontSize: 11,
+    fontSize: 12,
     color: "rgba(255,255,255,0.35)",
-    marginBottom: 10,
+    marginBottom: 4,
   },
   eventSelect: {
-    width: "100%",
-    background: "rgba(255,255,255,0.05)",
-    border: "1px solid rgba(255,255,255,0.1)",
+    background: "rgba(0,0,0,0.3)",
+    border: "1px solid rgba(200,255,0,0.2)",
     borderRadius: 8,
     padding: "10px 14px",
     color: "#fff",
     fontSize: 13,
+    width: "100%",
   },
-  divider: { height: 1, background: "rgba(255,255,255,0.06)" },
+
+  filterNotice: {
+    borderRadius: 8,
+    padding: "10px 14px",
+    border: "1px solid",
+    fontSize: 13,
+  },
+
   teamGrid: {
     display: "grid",
-    gridTemplateColumns: "1fr 40px 1fr",
+    gridTemplateColumns: "1fr 36px 1fr",
     gap: 8,
     alignItems: "start",
   },
@@ -690,7 +897,7 @@ const S = {
   teamLabel: {
     fontSize: 11,
     fontWeight: 700,
-    color: "rgba(255,255,255,0.35)",
+    color: "rgba(255,255,255,0.3)",
     textTransform: "uppercase",
     letterSpacing: "1px",
     marginBottom: 4,
@@ -701,24 +908,7 @@ const S = {
     justifyContent: "center",
     paddingTop: 36,
     fontSize: 13,
-    color: "rgba(255,255,255,0.3)",
-    fontWeight: 600,
-  },
-  cancelBtn: {
-    background: "none",
-    border: "1px solid rgba(255,255,255,0.1)",
-    borderRadius: 8,
-    padding: "10px 18px",
-    fontSize: 13,
-    color: "rgba(255,255,255,0.4)",
-    cursor: "pointer",
-  },
-  errBox: {
-    background: "rgba(255,80,80,0.1)",
-    border: "1px solid rgba(255,80,80,0.2)",
-    borderRadius: 8,
-    padding: "10px 14px",
-    fontSize: 13,
-    color: "#ff8080",
+    color: "rgba(255,255,255,0.25)",
+    fontWeight: 700,
   },
 };

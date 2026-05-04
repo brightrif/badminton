@@ -1,6 +1,7 @@
 from django.db import models
 from django.core.exceptions import ValidationError
 import random
+from .event_registration import EventRegistration
 
 class Country(models.Model):
     name = models.CharField(max_length=100, unique=True)
