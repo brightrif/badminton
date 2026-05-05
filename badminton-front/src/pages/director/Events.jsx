@@ -7,8 +7,10 @@
 //   Selecting a team in the match-creation form fills both player slots at once.
 
 import { useState, useEffect, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
 import { useDirectorApi as useApi } from "../../hooks/useDirectorApi";
 import { useAuth } from "../../context/AuthContext";
+import PlayerSearchPicker from "../../components/PlayerSearchPicker";
 import Modal, {
   FormField,
   Input,
@@ -165,8 +167,6 @@ function EventForm({ initial, tournaments, onSave, onClose }) {
 function PlayerRegistrationPanel({ event, onClose }) {
   const { authFetch } = useAuth();
   const [registrations, setRegistrations] = useState([]);
-  const [allPlayers, setAllPlayers] = useState([]);
-  const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [adding, setAdding] = useState(false);
   const [error, setError] = useState("");
@@ -174,20 +174,13 @@ function PlayerRegistrationPanel({ event, onClose }) {
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const [regRes, playersRes] = await Promise.all([
-        authFetch(`/api/event-registrations/?event=${event.id}`),
-        authFetch("/api/players/"),
-      ]);
-      const regData = await regRes.json();
-      const playersData = await playersRes.json();
-      setRegistrations(
-        Array.isArray(regData) ? regData : regData.results || [],
+      const res = await authFetch(
+        `/api/event-registrations/?event=${event.id}`,
       );
-      setAllPlayers(
-        Array.isArray(playersData) ? playersData : playersData.results || [],
-      );
+      const data = await res.json();
+      setRegistrations(Array.isArray(data) ? data : data.results || []);
     } catch {
-      setError("Failed to load data.");
+      setError("Failed to load registrations.");
     } finally {
       setLoading(false);
     }
@@ -198,19 +191,14 @@ function PlayerRegistrationPanel({ event, onClose }) {
   }, [loadData]);
 
   const registeredIds = new Set(registrations.map((r) => r.player));
-  const unregisteredPlayers = allPlayers.filter(
-    (p) =>
-      !registeredIds.has(p.id) &&
-      p.name.toLowerCase().includes(search.toLowerCase()),
-  );
 
-  const handleAdd = async (playerId) => {
+  const handleAdd = async (player) => {
     setAdding(true);
     setError("");
     try {
       const res = await authFetch("/api/event-registrations/", {
         method: "POST",
-        body: JSON.stringify({ event: event.id, player: playerId }),
+        body: JSON.stringify({ event: event.id, player: player.id }),
       });
       if (!res.ok) {
         const d = await res.json();
@@ -241,110 +229,72 @@ function PlayerRegistrationPanel({ event, onClose }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       {error && <div style={S.errBox}>{error}</div>}
-      {loading ? (
+
+      {/* Search & add */}
+      <div>
+        <div style={PR.sectionLabel}>Add Players</div>
+        <div style={PR.searchHint}>
+          Type a name to search all players. Already-registered players are
+          hidden.
+        </div>
+        <PlayerSearchPicker
+          onSelect={handleAdd}
+          excludeIds={registeredIds}
+          placeholder="Search players to add…"
+          disabled={adding}
+        />
+      </div>
+
+      <div style={S.divider} />
+
+      {/* Registered list */}
+      <div>
         <div
           style={{
-            color: "rgba(255,255,255,0.4)",
-            textAlign: "center",
-            padding: 32,
+            ...PR.sectionLabel,
+            display: "flex",
+            justifyContent: "space-between",
           }}
         >
-          Loading…
+          <span>Registered Players</span>
+          <span style={{ color: "#c8ff00", fontWeight: 700 }}>
+            {registrations.length}
+          </span>
         </div>
-      ) : (
-        <div style={PR.cols}>
-          {/* Registered */}
-          <div style={PR.col}>
-            <div style={PR.colHead}>
-              <span style={PR.colTitle}>Registered</span>
-              <span style={PR.colCount}>{registrations.length} players</span>
-            </div>
-            <div style={PR.playerList}>
-              {registrations.length === 0 ? (
-                <div style={PR.emptyMsg}>
-                  No players registered yet. Add players from the right.
-                </div>
-              ) : (
-                registrations.map((reg) => (
-                  <div key={reg.id} style={PR.playerRow}>
-                    <div style={PR.playerAvatar}>
-                      {reg.player_name?.charAt(0).toUpperCase()}
-                    </div>
-                    <div style={PR.playerInfo}>
-                      <div style={PR.playerName}>{reg.player_name}</div>
-                      {reg.player_country && (
-                        <div style={PR.playerCountry}>{reg.player_country}</div>
-                      )}
-                    </div>
-                    <button
-                      style={PR.removeBtn}
-                      onClick={() => handleRemove(reg.id)}
-                      title="Remove from event"
-                    >
-                      ✕
-                    </button>
-                  </div>
-                ))
-              )}
-            </div>
+        {loading ? (
+          <div style={PR.emptyMsg}>Loading…</div>
+        ) : registrations.length === 0 ? (
+          <div style={PR.emptyMsg}>
+            No players registered yet. Search above to add.
           </div>
+        ) : (
+          <div style={PR.playerList}>
+            {registrations.map((reg) => (
+              <div key={reg.id} style={PR.playerRow}>
+                <div style={PR.playerAvatar}>
+                  {reg.player_name?.charAt(0).toUpperCase()}
+                </div>
+                <div style={PR.playerInfo}>
+                  <div style={PR.playerName}>{reg.player_name}</div>
+                  {reg.player_country && (
+                    <div style={PR.playerCountry}>{reg.player_country}</div>
+                  )}
+                </div>
+                <button
+                  style={PR.removeBtn}
+                  onClick={() => handleRemove(reg.id)}
+                  title="Remove"
+                >
+                  ✕
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
 
-          {/* Available */}
-          <div style={PR.col}>
-            <div style={PR.colHead}>
-              <span style={PR.colTitle}>Add Players</span>
-              <span style={PR.colCount}>
-                {unregisteredPlayers.length} available
-              </span>
-            </div>
-            <input
-              style={PR.searchInput}
-              placeholder="Search players…"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
-            <div style={PR.playerList}>
-              {unregisteredPlayers.length === 0 ? (
-                <div style={PR.emptyMsg}>
-                  {search
-                    ? "No players match your search."
-                    : "All players are registered."}
-                </div>
-              ) : (
-                unregisteredPlayers.map((p) => (
-                  <div key={p.id} style={PR.playerRow}>
-                    <div
-                      style={{
-                        ...PR.playerAvatar,
-                        background: "rgba(255,255,255,0.06)",
-                        color: "rgba(255,255,255,0.4)",
-                      }}
-                    >
-                      {p.name?.charAt(0).toUpperCase()}
-                    </div>
-                    <div style={PR.playerInfo}>
-                      <div style={PR.playerName}>{p.name}</div>
-                      {p.country_name && (
-                        <div style={PR.playerCountry}>{p.country_name}</div>
-                      )}
-                    </div>
-                    <button
-                      style={PR.addBtn}
-                      onClick={() => handleAdd(p.id)}
-                      disabled={adding}
-                      title="Add to event"
-                    >
-                      +
-                    </button>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-        </div>
-      )}
       <div
-        style={{ display: "flex", justifyContent: "flex-end", marginTop: 20 }}
+        style={{ display: "flex", justifyContent: "flex-end", marginTop: 8 }}
       >
         <button style={S.cancelBtn} onClick={onClose}>
           Done
@@ -355,35 +305,28 @@ function PlayerRegistrationPanel({ event, onClose }) {
 }
 
 // ─── Team Registration Panel (NEW) ───────────────────────────────────────────
-
 function TeamRegistrationPanel({ event, onClose }) {
   const { authFetch } = useAuth();
   const [teams, setTeams] = useState([]);
-  const [players, setPlayers] = useState([]); // registered players for this event
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+
+  // new team being built — pick player1 first, then player2
   const [newTeam, setNewTeam] = useState({
-    player1: "",
-    player2: "",
+    player1: null,
+    player2: null,
     name: "",
   });
 
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const [teamsRes, playersRes] = await Promise.all([
-        authFetch(`/api/doubles-teams/?event=${event.id}`),
-        authFetch(
-          `/api/event-registrations/players_for_event/?event=${event.id}`,
-        ),
-      ]);
-      const teamsData = await teamsRes.json();
-      const playersData = await playersRes.json();
-      setTeams(Array.isArray(teamsData) ? teamsData : teamsData.results || []);
-      setPlayers(playersData.players || []);
+      const res = await authFetch(`/api/doubles-teams/?event=${event.id}`);
+      const data = await res.json();
+      setTeams(Array.isArray(data) ? data : data.results || []);
     } catch {
-      setError("Failed to load data.");
+      setError("Failed to load teams.");
     } finally {
       setLoading(false);
     }
@@ -393,14 +336,21 @@ function TeamRegistrationPanel({ event, onClose }) {
     loadData();
   }, [loadData]);
 
-  const handleCreate = async (e) => {
-    e.preventDefault();
+  const usedPlayerIds = new Set(teams.flatMap((t) => [t.player1, t.player2]));
+
+  // IDs excluded per picker: used globally + the other slot's selection
+  const excludeForP1 = new Set([
+    ...usedPlayerIds,
+    ...(newTeam.player2 ? [newTeam.player2.id] : []),
+  ]);
+  const excludeForP2 = new Set([
+    ...usedPlayerIds,
+    ...(newTeam.player1 ? [newTeam.player1.id] : []),
+  ]);
+
+  const handleCreate = async () => {
     if (!newTeam.player1 || !newTeam.player2) {
       setError("Please select both players.");
-      return;
-    }
-    if (newTeam.player1 === newTeam.player2) {
-      setError("Player 1 and Player 2 must be different.");
       return;
     }
     setSaving(true);
@@ -408,11 +358,10 @@ function TeamRegistrationPanel({ event, onClose }) {
     try {
       const payload = {
         event: event.id,
-        player1: Number(newTeam.player1),
-        player2: Number(newTeam.player2),
+        player1: newTeam.player1.id,
+        player2: newTeam.player2.id,
       };
       if (newTeam.name.trim()) payload.name = newTeam.name.trim();
-
       const res = await authFetch("/api/doubles-teams/", {
         method: "POST",
         body: JSON.stringify(payload),
@@ -421,7 +370,7 @@ function TeamRegistrationPanel({ event, onClose }) {
         const d = await res.json();
         throw new Error(Object.values(d).flat().join(" "));
       }
-      setNewTeam({ player1: "", player2: "", name: "" });
+      setNewTeam({ player1: null, player2: null, name: "" });
       await loadData();
     } catch (err) {
       setError(err.message);
@@ -443,10 +392,6 @@ function TeamRegistrationPanel({ event, onClose }) {
     }
   };
 
-  // Players not yet in a team for this event
-  const usedPlayerIds = new Set(teams.flatMap((t) => [t.player1, t.player2]));
-  const availablePlayers = players; // show all registered; backend validates uniqueness
-
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
       {error && <div style={S.errBox}>{error}</div>}
@@ -454,155 +399,137 @@ function TeamRegistrationPanel({ event, onClose }) {
       {/* Info banner */}
       <div style={TM.infoBanner}>
         <span style={{ fontSize: 13, color: "rgba(255,200,0,0.8)" }}>
-          🤝 Teams created here will appear as single-select dropdowns in the
-          match creation form, automatically filling both player slots.
+          🤝 Teams created here appear as single dropdowns in match creation,
+          filling both player slots automatically.
         </span>
       </div>
 
-      {/* Create new team form */}
+      {/* Create new team */}
       <div style={TM.createBox}>
         <div style={TM.createTitle}>Create New Team</div>
-        <form
-          onSubmit={handleCreate}
-          style={{ display: "flex", flexDirection: "column", gap: 12 }}
+
+        <div
+          style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}
         >
-          <div
-            style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}
-          >
-            {/* <FormField label="Player 1">
-              <Select
-                value={newTeam.player1}
-                onChange={(e) =>
-                  setNewTeam((f) => ({ ...f, player1: e.target.value }))
-                }
-                required
-              >
-                <option value="">— Select —</option>
-                {availablePlayers.map((p) => (
-                  <option
-                    key={p.id}
-                    value={p.id}
-                    disabled={String(p.id) === String(newTeam.player2)}
-                  >
-                    {p.name}
-                    {p.country ? ` (${p.country})` : ""}
-                  </option>
-                ))}
-              </Select>
-            </FormField> */}
-            {/* <FormField label="Player 2">
-              <Select
-                value={newTeam.player2}
-                onChange={(e) =>
-                  setNewTeam((f) => ({ ...f, player2: e.target.value }))
-                }
-                required
-              >
-                <option value="">— Select —</option>
-                {availablePlayers.map((p) => (
-                  <option
-                    key={p.id}
-                    value={p.id}
-                    disabled={String(p.id) === String(newTeam.player1)}
-                  >
-                    {p.name}
-                    {p.country ? ` (${p.country})` : ""}
-                  </option>
-                ))}
-              </Select>
-            </FormField> */}
-
-            <FormField label="Player 1">
-              <Select
-                value={newTeam.player1}
-                onChange={(e) =>
-                  setNewTeam((f) => ({ ...f, player1: e.target.value }))
-                }
-                required
-              >
-                <option value="">— Select —</option>
-                {availablePlayers
-                  .filter(
-                    (p) =>
-                      // exclude players already in a team, UNLESS they are the currently selected player2
-                      !usedPlayerIds.has(p.id) ||
-                      String(p.id) === String(newTeam.player2),
-                  )
-                  .map((p) => (
-                    <option
-                      key={p.id}
-                      value={p.id}
-                      disabled={String(p.id) === String(newTeam.player2)}
+          {/* Player 1 picker */}
+          <div>
+            <div style={TM.slotLabel}>Player 1</div>
+            {newTeam.player1 ? (
+              <div style={TM.selectedPlayer}>
+                <div style={TM.selectedAvatar}>
+                  {newTeam.player1.name.charAt(0).toUpperCase()}
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 13, color: "#fff", fontWeight: 500 }}>
+                    {newTeam.player1.name}
+                  </div>
+                  {newTeam.player1.country_name && (
+                    <div
+                      style={{ fontSize: 11, color: "rgba(255,255,255,0.35)" }}
                     >
-                      {p.name}
-                      {p.country ? ` (${p.country})` : ""}
-                    </option>
-                  ))}
-              </Select>
-            </FormField>
+                      {newTeam.player1.country_name}
+                    </div>
+                  )}
+                </div>
+                <button
+                  style={TM.clearSlotBtn}
+                  onClick={() => setNewTeam((f) => ({ ...f, player1: null }))}
+                >
+                  ✕
+                </button>
+              </div>
+            ) : (
+              <PlayerSearchPicker
+                onSelect={(p) => setNewTeam((f) => ({ ...f, player1: p }))}
+                excludeIds={excludeForP1}
+                placeholder="Search player 1…"
+              />
+            )}
+          </div>
 
-            <FormField label="Player 2">
-              <Select
-                value={newTeam.player2}
-                onChange={(e) =>
-                  setNewTeam((f) => ({ ...f, player2: e.target.value }))
-                }
-                required
-              >
-                <option value="">— Select —</option>
-                {availablePlayers
-                  .filter(
-                    (p) =>
-                      !usedPlayerIds.has(p.id) ||
-                      String(p.id) === String(newTeam.player1),
-                  )
-                  .map((p) => (
-                    <option
-                      key={p.id}
-                      value={p.id}
-                      disabled={String(p.id) === String(newTeam.player1)}
+          {/* Player 2 picker */}
+          <div>
+            <div style={TM.slotLabel}>Player 2</div>
+            {newTeam.player2 ? (
+              <div style={TM.selectedPlayer}>
+                <div style={TM.selectedAvatar}>
+                  {newTeam.player2.name.charAt(0).toUpperCase()}
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 13, color: "#fff", fontWeight: 500 }}>
+                    {newTeam.player2.name}
+                  </div>
+                  {newTeam.player2.country_name && (
+                    <div
+                      style={{ fontSize: 11, color: "rgba(255,255,255,0.35)" }}
                     >
-                      {p.name}
-                      {p.country ? ` (${p.country})` : ""}
-                    </option>
-                  ))}
-              </Select>
-            </FormField>
+                      {newTeam.player2.country_name}
+                    </div>
+                  )}
+                </div>
+                <button
+                  style={TM.clearSlotBtn}
+                  onClick={() => setNewTeam((f) => ({ ...f, player2: null }))}
+                >
+                  ✕
+                </button>
+              </div>
+            ) : (
+              <PlayerSearchPicker
+                onSelect={(p) => setNewTeam((f) => ({ ...f, player2: p }))}
+                excludeIds={excludeForP2}
+                placeholder="Search player 2…"
+                disabled={!newTeam.player1}
+              />
+            )}
           </div>
-          <FormField
-            label="Team name (optional)"
-            hint="Leave blank to auto-generate from player names"
+        </div>
+
+        {/* Optional name */}
+        <div style={{ marginTop: 12 }}>
+          <div style={TM.slotLabel}>Team name (optional)</div>
+          <input
+            style={TM.nameInput}
+            placeholder={
+              newTeam.player1 && newTeam.player2
+                ? `${newTeam.player1.name} / ${newTeam.player2.name}`
+                : "Auto-generated from player names"
+            }
+            value={newTeam.name}
+            onChange={(e) =>
+              setNewTeam((f) => ({ ...f, name: e.target.value }))
+            }
+          />
+        </div>
+
+        <div
+          style={{ display: "flex", justifyContent: "flex-end", marginTop: 12 }}
+        >
+          <button
+            style={{
+              ...TM.addTeamBtn,
+              opacity: newTeam.player1 && newTeam.player2 && !saving ? 1 : 0.4,
+              cursor:
+                newTeam.player1 && newTeam.player2 && !saving
+                  ? "pointer"
+                  : "not-allowed",
+            }}
+            onClick={handleCreate}
+            disabled={!newTeam.player1 || !newTeam.player2 || saving}
           >
-            <Input
-              value={newTeam.name}
-              onChange={(e) =>
-                setNewTeam((f) => ({ ...f, name: e.target.value }))
-              }
-              placeholder="e.g. Ali / Hassan"
-            />
-          </FormField>
-          <div style={{ display: "flex", justifyContent: "flex-end" }}>
-            <SubmitBtn loading={saving}>＋ Add Team</SubmitBtn>
-          </div>
-        </form>
+            {saving ? "Adding…" : "＋ Add Team"}
+          </button>
+        </div>
       </div>
 
-      {/* Existing teams list */}
+      {/* Team list */}
       <div>
         <div style={TM.listTitle}>
           Registered Teams
           <span style={TM.listCount}>{teams.length}</span>
         </div>
         {loading ? (
-          <div
-            style={{
-              color: "rgba(255,255,255,0.4)",
-              padding: 24,
-              textAlign: "center",
-            }}
-          >
-            Loading…
-          </div>
+          <div style={TM.emptyMsg}>Loading…</div>
         ) : teams.length === 0 ? (
           <div style={TM.emptyMsg}>
             No teams yet. Create your first team above.
@@ -643,10 +570,16 @@ function TeamRegistrationPanel({ event, onClose }) {
     </div>
   );
 }
-
 // ─── Event card ───────────────────────────────────────────────────────────────
 
-function EventCard({ ev, onEdit, onDelete, onManagePlayers, onManageTeams }) {
+function EventCard({
+  ev,
+  onEdit,
+  onDelete,
+  onManagePlayers,
+  onManageTeams,
+  onViewBracket,
+}) {
   const typeClr = TYPE_CLR[ev.match_type] || TYPE_CLR.SINGLE;
   const fmtClr = FORMAT_CLR[ev.format] || FORMAT_CLR[""];
   const typeLabel =
@@ -739,6 +672,12 @@ function EventCard({ ev, onEdit, onDelete, onManagePlayers, onManageTeams }) {
                 🤝 Manage Teams
               </button>
             )}
+            {/* Bracket button (knockout events only) — NEW */}
+            {ev.format === "KNOCKOUT" && (
+              <button style={S.bracketBtn} onClick={() => onViewBracket(ev)}>
+                🏆 Bracket
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -750,6 +689,9 @@ function EventCard({ ev, onEdit, onDelete, onManagePlayers, onManageTeams }) {
         <button style={S.delBtn} onClick={() => onDelete(ev)}>
           Delete
         </button>
+        <button style={S.bracketBtn} onClick={() => onViewBracket(ev)}>
+          View Bracket
+        </button>
       </div>
     </div>
   );
@@ -759,6 +701,7 @@ function EventCard({ ev, onEdit, onDelete, onManagePlayers, onManageTeams }) {
 
 export default function Events() {
   const { authFetch } = useAuth();
+  const navigate = useNavigate();
   const { data: events, loading, refresh } = useApi("/api/events/");
   const { data: tournaments } = useApi("/api/tournaments/");
   const [showCreate, setShowCreate] = useState(false);
@@ -872,6 +815,9 @@ export default function Events() {
               onDelete={handleDelete}
               onManagePlayers={setManagingEvent}
               onManageTeams={setTeamsEvent} // NEW
+              onViewBracket={(ev) =>
+                navigate(`/director/events/${ev.id}/bracket`)
+              }
             />
           ))}
         </div>
@@ -1089,6 +1035,16 @@ const S = {
     fontWeight: 600,
     cursor: "pointer",
   },
+  bracketBtn: {
+    background: "rgba(200,255,0,0.08)",
+    color: "#c8ff00",
+    border: "1px solid rgba(200,255,0,0.25)",
+    borderRadius: 6,
+    padding: "5px 12px",
+    fontSize: 12,
+    fontWeight: 600,
+    cursor: "pointer",
+  },
   // Manage Teams button (NEW — orange accent to differentiate)
   teamsBtn: {
     background: "rgba(255,160,80,0.1)",
@@ -1223,6 +1179,15 @@ const PR = {
     padding: "16px 0",
     textAlign: "center",
   },
+  sectionLabel: {
+    fontSize: 12,
+    fontWeight: 600,
+    color: "rgba(255,255,255,0.5)",
+    textTransform: "uppercase",
+    letterSpacing: "0.04em",
+    marginBottom: 6,
+  },
+  searchHint: { fontSize: 12, color: "rgba(255,255,255,0.3)", marginBottom: 8 },
 };
 
 // Team panel styles (NEW)
@@ -1300,5 +1265,62 @@ const TM = {
     fontSize: 13,
     padding: "20px 0",
     textAlign: "center",
+  },
+  slotLabel: {
+    fontSize: 12,
+    fontWeight: 600,
+    color: "rgba(255,255,255,0.5)",
+    marginBottom: 6,
+    textTransform: "uppercase",
+    letterSpacing: "0.04em",
+  },
+  selectedPlayer: {
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+    padding: "8px 10px",
+    background: "rgba(200,255,0,0.06)",
+    border: "1px solid rgba(200,255,0,0.15)",
+    borderRadius: 8,
+  },
+  selectedAvatar: {
+    width: 28,
+    height: 28,
+    borderRadius: "50%",
+    background: "rgba(200,255,0,0.1)",
+    color: "#c8ff00",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    fontWeight: 700,
+    fontSize: 12,
+    flexShrink: 0,
+  },
+  clearSlotBtn: {
+    background: "none",
+    border: "none",
+    color: "rgba(255,255,255,0.3)",
+    fontSize: 12,
+    cursor: "pointer",
+    padding: "2px 4px",
+  },
+  nameInput: {
+    width: "100%",
+    background: "rgba(255,255,255,0.05)",
+    border: "1px solid rgba(255,255,255,0.1)",
+    borderRadius: 8,
+    padding: "9px 12px",
+    color: "#fff",
+    fontSize: 13,
+    outline: "none",
+  },
+  addTeamBtn: {
+    background: "rgba(200,255,0,0.15)",
+    color: "#c8ff00",
+    border: "1px solid rgba(200,255,0,0.25)",
+    borderRadius: 8,
+    padding: "9px 20px",
+    fontSize: 13,
+    fontWeight: 700,
   },
 };
