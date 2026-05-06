@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.db import models
 from django.core.exceptions import ValidationError
 import random
@@ -220,6 +221,13 @@ class Match(models.Model):
         help_text="4-digit PIN for umpire access. Set in admin before match day."
     )
     # ─────────────────────────────────────────────────────────────────────────
+    assigned_umpire = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='assigned_matches',
+        help_text='Umpire assigned by the director.',
+    )
         # ── Scoring format ────────────────────────────────────────────────────────────
     SCORING_15_NO_SET      = '15_NO_SET'
     SCORING_15_WITH_SET    = '15_WITH_SET'
@@ -381,6 +389,11 @@ class Match(models.Model):
                 current_game=self.current_game,
                 status=self.status,
             )
+            # Manually fire the bracket advance signal since .update() bypasses signals
+            if self.status == 'Completed':
+                from django.db.models.signals import post_save
+                self.refresh_from_db()
+                post_save.send(sender=self.__class__, instance=self, created=False)
 
         return result
 

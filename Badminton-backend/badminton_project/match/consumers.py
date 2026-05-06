@@ -244,6 +244,9 @@ class MatchConsumer(AsyncWebsocketConsumer):
             raise ValidationError("Match is not Live.")
         Match.objects.filter(pk=self.match_id).update(status='Completed')
         match.refresh_from_db()
+        # Trigger bracket advance
+        from django.db.models.signals import post_save
+        post_save.send(sender=Match, instance=match, created=False)
         return {
             'action':   'status_change',
             'match_id': match.id,

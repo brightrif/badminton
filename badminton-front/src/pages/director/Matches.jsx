@@ -26,9 +26,331 @@ const SCORING_FORMATS = [
   { value: "15_NO_SET", label: "15 pts — no settings" },
 ];
 
+// ─── Umpire assign modal ──────────────────────────────────────────────────────
+
+function UmpireAssignModal({ match, onClose, onSaved }) {
+  const { authFetch } = useAuth();
+  const [umpires, setUmpires] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [selected, setSelected] = useState(match.assigned_umpire ?? "");
+  const [error, setError] = useState("");
+
+  // Team label helpers
+  const t1 =
+    [match.player1_team1_name, match.player2_team1_name]
+      .filter(Boolean)
+      .join(" / ") || "TBD";
+  const t2 =
+    [match.player1_team2_name, match.player2_team2_name]
+      .filter(Boolean)
+      .join(" / ") || "TBD";
+
+  // Fetch available umpires on open
+  useEffect(() => {
+    authFetch("/api/matches/umpires/")
+      .then((r) => r.json())
+      .then((data) => {
+        setUmpires(Array.isArray(data) ? data : []);
+        setLoading(false);
+      })
+      .catch(() => {
+        setError("Could not load umpires.");
+        setLoading(false);
+      });
+  }, [authFetch]);
+
+  const handleSave = async () => {
+    setSaving(true);
+    setError("");
+    try {
+      const res = await authFetch(`/api/matches/${match.id}/`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ assigned_umpire: selected || null }),
+      });
+      if (!res.ok) throw new Error("Failed to save.");
+      onSaved();
+      onClose();
+    } catch (e) {
+      setError(e.message);
+      setSaving(false);
+    }
+  };
+
+  return (
+    // ── Backdrop ──────────────────────────────────────────────────────────────
+    <div style={UM.backdrop} onClick={onClose}>
+      <div style={UM.modal} onClick={(e) => e.stopPropagation()}>
+        {/* Header */}
+        <div style={UM.header}>
+          <div>
+            <div style={UM.title}>🏸 Assign Umpire</div>
+            <div style={UM.matchLabel}>
+              {t1} <span style={UM.vs}>vs</span> {t2}
+            </div>
+          </div>
+          <button style={UM.closeBtn} onClick={onClose}>
+            ✕
+          </button>
+        </div>
+
+        {/* PIN display */}
+        {match.umpire_pin && (
+          <div style={UM.pinRow}>
+            Match PIN <strong style={UM.pin}>{match.umpire_pin}</strong>
+            <span style={UM.pinHint}>(share with umpire as fallback)</span>
+          </div>
+        )}
+
+        {/* Umpire list */}
+        <div style={UM.listWrap}>
+          {loading ? (
+            <div style={UM.empty}>Loading umpires…</div>
+          ) : umpires.length === 0 ? (
+            <div style={UM.empty}>
+              No umpire accounts found.
+              <br />
+              Create users in Django Admin first.
+            </div>
+          ) : (
+            <>
+              {/* None option */}
+              <div
+                style={{
+                  ...UM.umpireRow,
+                  ...(selected === "" ? UM.umpireRowSelected : {}),
+                }}
+                onClick={() => setSelected("")}
+              >
+                <div style={UM.avatar}>—</div>
+                <div style={UM.umpireName}>No umpire assigned</div>
+                {selected === "" && <div style={UM.tick}>✓</div>}
+              </div>
+
+              {/* Umpire rows */}
+              {umpires.map((u) => {
+                const name =
+                  u.first_name && u.last_name
+                    ? `${u.first_name} ${u.last_name}`
+                    : u.username;
+                const initials = name
+                  .split(" ")
+                  .map((w) => w[0])
+                  .join("")
+                  .slice(0, 2)
+                  .toUpperCase();
+                const isSelected = String(selected) === String(u.id);
+
+                return (
+                  <div
+                    key={u.id}
+                    style={{
+                      ...UM.umpireRow,
+                      ...(isSelected ? UM.umpireRowSelected : {}),
+                    }}
+                    onClick={() => setSelected(u.id)}
+                  >
+                    <div style={UM.avatar}>{initials}</div>
+                    <div style={UM.umpireName}>
+                      {name}
+                      <span style={UM.username}>@{u.username}</span>
+                    </div>
+                    {isSelected && <div style={UM.tick}>✓</div>}
+                  </div>
+                );
+              })}
+            </>
+          )}
+        </div>
+
+        {error && <div style={UM.error}>⚠ {error}</div>}
+
+        {/* Footer */}
+        <div style={UM.footer}>
+          <button style={UM.cancelBtn} onClick={onClose} disabled={saving}>
+            Cancel
+          </button>
+          <button
+            style={{ ...UM.saveBtn, opacity: saving ? 0.5 : 1 }}
+            onClick={handleSave}
+            disabled={saving}
+          >
+            {saving ? "Saving…" : "Confirm assignment"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Styles for UmpireAssignModal
+const UM = {
+  backdrop: {
+    position: "fixed",
+    inset: 0,
+    background: "rgba(0,0,0,0.7)",
+    zIndex: 1000,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: "24px",
+  },
+  modal: {
+    background: "#161b22",
+    border: "1px solid rgba(255,255,255,0.1)",
+    borderRadius: "16px",
+    width: "100%",
+    maxWidth: "420px",
+    display: "flex",
+    flexDirection: "column",
+    maxHeight: "85vh",
+    overflow: "hidden",
+  },
+  header: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    padding: "20px 20px 12px",
+    borderBottom: "1px solid rgba(255,255,255,0.07)",
+  },
+  title: {
+    fontSize: "16px",
+    fontWeight: "600",
+    color: "#f8fafc",
+  },
+  matchLabel: {
+    fontSize: "12px",
+    color: "rgba(255,255,255,0.4)",
+    marginTop: "4px",
+  },
+  vs: { color: "rgba(255,255,255,0.2)", margin: "0 4px" },
+  closeBtn: {
+    background: "none",
+    border: "none",
+    color: "rgba(255,255,255,0.3)",
+    fontSize: "16px",
+    cursor: "pointer",
+    padding: "0 0 0 12px",
+  },
+  pinRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+    padding: "10px 20px",
+    background: "rgba(200,255,0,0.05)",
+    fontSize: "12px",
+    color: "rgba(255,255,255,0.4)",
+  },
+  pin: {
+    color: "#c8ff00",
+    letterSpacing: "0.15em",
+    fontSize: "14px",
+  },
+  pinHint: { color: "rgba(255,255,255,0.25)", fontSize: "11px" },
+  listWrap: {
+    overflowY: "auto",
+    flex: 1,
+    padding: "12px 16px",
+    display: "flex",
+    flexDirection: "column",
+    gap: "6px",
+  },
+  empty: {
+    textAlign: "center",
+    color: "rgba(255,255,255,0.3)",
+    fontSize: "13px",
+    padding: "24px 0",
+    lineHeight: "1.6",
+  },
+  umpireRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: "12px",
+    padding: "10px 12px",
+    borderRadius: "10px",
+    cursor: "pointer",
+    border: "1px solid transparent",
+    transition: "background 0.15s",
+    background: "rgba(255,255,255,0.03)",
+  },
+  umpireRowSelected: {
+    background: "rgba(200,255,0,0.08)",
+    border: "1px solid rgba(200,255,0,0.25)",
+  },
+  avatar: {
+    width: "36px",
+    height: "36px",
+    borderRadius: "50%",
+    background: "rgba(200,255,0,0.12)",
+    color: "#c8ff00",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    fontSize: "13px",
+    fontWeight: "700",
+    flexShrink: 0,
+  },
+  umpireName: {
+    flex: 1,
+    fontSize: "14px",
+    color: "#f1f5f9",
+    fontWeight: "500",
+    display: "flex",
+    flexDirection: "column",
+    gap: "2px",
+  },
+  username: {
+    fontSize: "11px",
+    color: "rgba(255,255,255,0.3)",
+    fontWeight: "400",
+  },
+  tick: {
+    color: "#c8ff00",
+    fontSize: "16px",
+    fontWeight: "700",
+    flexShrink: 0,
+  },
+  error: {
+    margin: "0 16px",
+    background: "rgba(255,60,60,0.1)",
+    border: "1px solid rgba(255,60,60,0.3)",
+    color: "#ff6b6b",
+    borderRadius: "8px",
+    padding: "10px 14px",
+    fontSize: "13px",
+  },
+  footer: {
+    display: "flex",
+    gap: "10px",
+    padding: "14px 20px",
+    borderTop: "1px solid rgba(255,255,255,0.07)",
+    justifyContent: "flex-end",
+  },
+  cancelBtn: {
+    background: "none",
+    border: "1px solid rgba(255,255,255,0.1)",
+    borderRadius: "8px",
+    padding: "9px 18px",
+    color: "rgba(255,255,255,0.4)",
+    fontSize: "13px",
+    cursor: "pointer",
+  },
+  saveBtn: {
+    background: "#c8ff00",
+    border: "none",
+    borderRadius: "8px",
+    padding: "9px 20px",
+    color: "#0a0a0a",
+    fontSize: "13px",
+    fontWeight: "700",
+    cursor: "pointer",
+  },
+};
+
 // ─── Match row ────────────────────────────────────────────────────────────────
 
-function MatchRow({ m, onEdit, onDelete, editLoadingId }) {
+function MatchRow({ m, onEdit, onDelete, onAssignUmpire, editLoadingId }) {
   const t1 =
     [m.player1_team1_name, m.player2_team1_name].filter(Boolean).join(" / ") ||
     "TBD";
@@ -44,6 +366,8 @@ function MatchRow({ m, onEdit, onDelete, editLoadingId }) {
         minute: "2-digit",
       })
     : "—";
+
+  const hasUmpire = !!m.assigned_umpire;
 
   return (
     <div style={S.row}>
@@ -76,6 +400,21 @@ function MatchRow({ m, onEdit, onDelete, editLoadingId }) {
         </div>
       )}
       <div style={S.rowActions}>
+        {/* ── Umpire assign button — NEW ─────────────────────────────────── */}
+        <button
+          style={{
+            ...S.umpireBtn,
+            ...(hasUmpire ? S.umpireBtnAssigned : {}),
+          }}
+          onClick={() => onAssignUmpire(m)}
+          title={
+            hasUmpire ? `Umpire: ${m.assigned_umpire_name}` : "Assign umpire"
+          }
+        >
+          🏸
+        </button>
+
+        {/* Edit */}
         <button
           style={S.editBtn}
           onClick={() => onEdit(m)}
@@ -83,6 +422,8 @@ function MatchRow({ m, onEdit, onDelete, editLoadingId }) {
         >
           {editLoadingId === m.id ? "…" : "Edit"}
         </button>
+
+        {/* Delete */}
         <button style={S.delBtn} onClick={() => onDelete(m)}>
           ✕
         </button>
@@ -90,7 +431,6 @@ function MatchRow({ m, onEdit, onDelete, editLoadingId }) {
     </div>
   );
 }
-
 // ─── Match form ───────────────────────────────────────────────────────────────
 
 function MatchForm({ initial, onSave, onClose }) {
@@ -686,6 +1026,7 @@ export default function Matches() {
   const [showCreate, setShowCreate] = useState(false);
   const [editing, setEditing] = useState(null);
   const [editLoading, setEditLoading] = useState(null); // holds ID of match being fetched
+  const [assigningUmpire, setAssigningUmpire] = useState(null);
 
   const handleEdit = async (m) => {
     setEditLoading(m.id);
@@ -720,6 +1061,8 @@ export default function Matches() {
     const matchStatus = !filterStatus || m.status === filterStatus;
     return matchSearch && matchStatus;
   });
+
+  const handleAssignUmpire = (match) => setAssigningUmpire(match);
 
   const handleDelete = async (m) => {
     const t1 =
@@ -816,6 +1159,7 @@ export default function Matches() {
               m={m}
               onEdit={handleEdit}
               onDelete={handleDelete}
+              onAssignUmpire={handleAssignUmpire}
               editLoadingId={editLoading}
             />
           ))}
@@ -849,6 +1193,17 @@ export default function Matches() {
             onClose={() => setEditing(null)}
           />
         </Modal>
+      )}
+
+      {assigningUmpire && (
+        <UmpireAssignModal
+          match={assigningUmpire}
+          onClose={() => setAssigningUmpire(null)}
+          onSaved={() => {
+            setAssigningUmpire(null);
+            refresh();
+          }}
+        />
       )}
     </div>
   );
@@ -983,6 +1338,25 @@ const S = {
     padding: "5px 10px",
     fontSize: 12,
     cursor: "pointer",
+  },
+  umpireBtn: {
+    background: "rgba(255,255,255,0.05)",
+    border: "1px solid rgba(255,255,255,0.08)",
+    borderRadius: 6,
+    padding: "0",
+    width: 28,
+    height: 28,
+    fontSize: 13,
+    cursor: "pointer",
+    lineHeight: 1,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    flexShrink: 0,
+  },
+  umpireBtnAssigned: {
+    background: "rgba(200,255,0,0.12)",
+    border: "1px solid rgba(200,255,0,0.3)",
   },
   cancelBtn: {
     background: "none",

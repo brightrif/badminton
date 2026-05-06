@@ -363,6 +363,18 @@ class MatchViewSet(viewsets.ModelViewSet):
             'match_id': match.id,
             'expires_in_seconds': TOKEN_TTL_SECONDS,
         })
+    @action(detail=False, methods=['get'], url_path='umpires',
+            permission_classes=[AllowAny])
+    def umpires(self, request):
+        """Return all active users to populate the umpire assign dropdown."""
+        from django.contrib.auth import get_user_model
+        User = get_user_model()
+        users = list(
+            User.objects.filter(is_active=True)
+            .values('id', 'username', 'first_name', 'last_name')
+            .order_by('first_name', 'username')
+        )
+        return Response(users)
     # ─────────────────────────────────────────────────────────────────────────
     @action(detail=True, methods=['post'], url_path='umpire_token',
         authentication_classes=[JWTAuthentication],permission_classes=[IsAuthenticated])
@@ -421,3 +433,96 @@ class TournamentVenueViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         return TournamentVenue.objects.select_related('tournament', 'venue')
+    
+
+# ── Action 1: my_matches ──────────────────────────────────────────────────────
+# Returns only matches assigned to the currently logged-in umpire.
+# Used by the UmpireDashboard to populate the match list.
+#
+# GET /api/matches/my_matches/
+# Header: Authorization: Bearer <jwt>
+ 
+@action(
+    detail=False,
+    methods=['get'],
+    url_path='my_matches',
+    authentication_classes=[JWTAuthentication],
+    permission_classes=[IsAuthenticated],
+)
+def my_matches(self, request):
+    """
+    Return matches assigned to the authenticated umpire, split by status.
+    """
+    umpire = request.user
+ 
+    qs = (
+        self.get_queryset()
+        .filter(assigned_umpire=umpire)
+        .select_related(
+            'tournament', 'player1_team1', 'player1_team2',
+            'player2_team1', 'player2_team2', 'venue', 'court',
+        )
+        .order_by('scheduled_time')
+    )
+ 
+    live      = qs.filter(status='Live')
+    upcoming  = qs.filter(status='Upcoming')
+    completed = qs.filter(status='Completed').order_by('-scheduled_time')[:10]
+ 
+    from .serializers import MatchListSerializer
+    ctx = {'request': request}
+ 
+    return Response({
+        'live':      MatchListSerializer(live,      many=True, context=ctx).data,
+        'upcoming':  MatchListSerializer(upcoming,  many=True, context=ctx).data,
+        'completed': MatchListSerializer(completed, many=True, context=ctx).data,
+    })
+ 
+ 
+# ── Action 2: umpire_token (updated — already exists, add assignment check) ───
+# This replaces the existing umpire_token action.
+# If the umpire is assigned to the match, issue the HMAC token automatically.
+# No PIN needed — JWT + assignment is proof enough.
+#
+# POST /api/matches/<id>/umpire_token/
+# Header: Authorization: Bearer <jwt>
+ 
+@action(
+    detail=True,
+    methods=['post'],
+    url_path='umpire_token',
+    authentication_classes=[JWTAuthentication],
+    permission_classes=[IsAuthenticated],
+)
+def umpire_token(self, request, pk=None):
+    """
+    Issue an HMAC umpire token for WebSocket access.
+ 
+    Two cases:
+      1. Umpire is assigned to this match  → token issued automatically.
+      2. Umpire is not assigned (superuser/director override) → token issued
+         only if the user is staff or has director role.
+ 
+    The WS consumer is unchanged — it still validates the same HMAC token.
+    """
+    match = self.get_object()
+    user  = request.user
+ 
+    is_assigned = (
+        match.assigned_umpire_id is not None and
+        match.assigned_umpire_id == user.pk
+    )
+    is_privileged = user.is_staff or getattr(user, 'role', '') in ('director', 'admin')
+ 
+    if not is_assigned and not is_privileged:
+        return Response(
+            {'error': 'You are not assigned to this match.'},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+ 
+    token = make_token(match.id)
+    return Response({
+        'token':              token,
+        'match_id':           match.id,
+        'expires_in_seconds': TOKEN_TTL_SECONDS,
+    })

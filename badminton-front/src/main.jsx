@@ -24,6 +24,10 @@ import DirectorVenues from "./pages/director/Venues";
 import DirectorEvents from "./pages/director/Events";
 import EventBracket from "./pages/director/EventBracket";
 
+import UmpireLogin from "./pages/UmpireLogin";
+import UmpireDashboard from "./pages/UmpireDashboard";
+import ProtectedUmpire from "./components/ProtectedUmpire";
+
 ReactDOM.createRoot(document.getElementById("root")).render(
   <React.StrictMode>
     <AuthProvider>
@@ -48,6 +52,16 @@ ReactDOM.createRoot(document.getElementById("root")).render(
             <Route path="events" element={<DirectorEvents />} />
             <Route path="events/:id/bracket" element={<EventBracket />} />
           </Route>
+          {/* umpire  */}
+          <Route path="/umpire/login" element={<UmpireLogin />} />
+          <Route
+            path="/umpire/dashboard"
+            element={
+              <ProtectedUmpire>
+                <UmpireDashboard />
+              </ProtectedUmpire>
+            }
+          />
         </Routes>
       </BrowserRouter>
     </AuthProvider>

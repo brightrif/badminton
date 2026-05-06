@@ -12,7 +12,9 @@ const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000/api";
 export default function UmpirePanel() {
   const { matchId } = useParams();
   const navigate = useNavigate();
-  const token = localStorage.getItem(`umpire_token_${matchId}`);
+  const token =
+    sessionStorage.getItem(`umpire_token_${matchId}`) ||
+    localStorage.getItem(`umpire_token_${matchId}`);
 
   useEffect(() => {
     if (!token) navigate("/umpire", { replace: true });
@@ -99,6 +101,7 @@ export default function UmpirePanel() {
   };
 
   const handleLogout = () => {
+    sessionStorage.removeItem(`umpire_token_${matchId}`);
     localStorage.removeItem(`umpire_token_${matchId}`);
     navigate("/umpire");
   };

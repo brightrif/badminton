@@ -179,7 +179,11 @@ class MatchSerializer(serializers.ModelSerializer):
     match_winner = serializers.SerializerMethodField()
 
     event_name = serializers.CharField(source='event.name', read_only=True, default=None)
-    
+    assigned_umpire_name = serializers.CharField(
+      source='assigned_umpire.get_full_name',
+      read_only=True,
+      default=None,
+  )
     class Meta:
         model = Match
         fields = [
@@ -193,7 +197,7 @@ class MatchSerializer(serializers.ModelSerializer):
             'team1_sets', 'team2_sets',
             'venue', 'venue_name', 'court', 'court_name',
             'game_scores', 'current_game_score', 'match_winner',
-            'created_at', 'updated_at','scoring_format'
+            'created_at', 'updated_at','scoring_format','assigned_umpire','assigned_umpire_name'
         ]
         read_only_fields = ['created_at', 'updated_at']
 
