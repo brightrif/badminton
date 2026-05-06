@@ -393,6 +393,34 @@ class MatchViewSet(viewsets.ModelViewSet):
             'match_id': match.id,
             'expires_in_seconds': TOKEN_TTL_SECONDS,
         })
+    # Inside MatchViewSet, add this action:
+    @action(detail=False, methods=['get'], 
+            permission_classes=[IsAuthenticated],
+            authentication_classes=[JWTAuthentication])
+    def my_matches(self, request):
+        """
+        Returns all matches for the authenticated user's linked player profile.
+        GET /api/matches/my_matches/
+        GET /api/matches/my_matches/?status=Live
+        """
+        player = getattr(request.user, 'player', None)
+        if player is None:
+            return Response(
+                {'detail': 'No player profile linked to your account.'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        qs = self.get_queryset().filter(
+            Q(player1_team1=player) | Q(player2_team1=player) |
+            Q(player1_team2=player) | Q(player2_team2=player)
+        )
+
+        status_filter = request.query_params.get('status')
+        if status_filter:
+            qs = qs.filter(status=status_filter)
+
+        serializer = MatchListSerializer(qs, many=True)
+        return Response(serializer.data)
     
     
 class SponsorViewSet(viewsets.ModelViewSet):

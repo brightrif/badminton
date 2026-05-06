@@ -193,7 +193,7 @@ export default function UmpireDashboard() {
     setFetching(true);
     setError("");
     try {
-      const res = await authFetch(`${API_BASE}/matches/my_matches/`);
+      const res = await authFetch(`/api/matches/my_matches/`);
       if (res.status === 401) {
         // Token expired and refresh failed — send back to login
         navigate("/umpire/login");
