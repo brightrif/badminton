@@ -122,8 +122,7 @@ class BracketMatch(models.Model):
 
     @property
     def entry1_name(self):
-        if self.is_bye:
-            return "BYE"
+        # For bye slots: show the team name if assigned, else TBD
         if self.entry1_id:
             return self.entry1.name if self.entry1 else "TBD"
         if self.entry1_player_id:
@@ -132,8 +131,9 @@ class BracketMatch(models.Model):
 
     @property
     def entry2_name(self):
+        # Bye slots only have entry1; entry2 is always "—"
         if self.is_bye:
-            return "BYE"
+            return "—"
         if self.entry2_id:
             return self.entry2.name if self.entry2 else "TBD"
         if self.entry2_player_id:
@@ -266,6 +266,8 @@ def create_bracket_slots(event):
                 bm.feeds_as_slot = feeds_slot
 
     # ── 3. Mark BYE slots (last bye_count R1 positions) ──────────────────────
+    # For 12 teams: positions 5-8 in R1 are bye slots.
+    # Director assigns ONE team to each; that team auto-advances to R2.
     if bye_count > 0:
         r1_count = draw_size >> 1
         for pos in range(r1_count - bye_count + 1, r1_count + 1):
@@ -418,7 +420,12 @@ def auto_advance_bracket(sender, instance, **kwargs):
 # ══════════════════════════════════════════════════════════════════════════════
 # VIEWSET
 # ══════════════════════════════════════════════════════════════════════════════
-
+def _can_manually_assign(bm):
+    """
+    All R1 slots are manually assignable — both real match slots and bye slots.
+    R2+ slots are auto-filled from match results only.
+    """
+    return bm.round_number == 1
 class BracketMatchViewSet(viewsets.ReadOnlyModelViewSet):
     """
     GET  /api/bracket-matches/          — list all
@@ -443,14 +450,9 @@ class BracketMatchViewSet(viewsets.ReadOnlyModelViewSet):
         """
         bm = self.get_object()
 
-        if bm.round_number != 1:
+        if not _can_manually_assign(bm):
             return Response(
-                {'error': 'Entries can only be manually assigned to Round 1 slots.'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        if bm.is_bye:
-            return Response(
-                {'error': 'Cannot assign entries to a BYE slot.'},
+                {'error': 'This slot is auto-filled from match results and cannot be manually assigned.'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -481,8 +483,51 @@ class BracketMatchViewSet(viewsets.ReadOnlyModelViewSet):
                 return Response({'error': 'No entry data provided.'},
                                 status=status.HTTP_400_BAD_REQUEST)
 
+            # ── Apply is_bye flag from frontend request ───────────────────────
+            # This allows any R1 slot to be switched between real match / bye
+            is_bye_request = bool(request.data.get('is_bye', False))
+            updates['is_bye'] = is_bye_request
+
+            # ── If switching FROM bye TO real match: undo R2 pre-advancement ──
+            if not is_bye_request and bm.is_bye and bm.feeds_into_id:
+                if bm.feeds_as_slot == 1:
+                    BracketMatch.objects.filter(pk=bm.feeds_into_id).update(
+                        entry1=None, entry1_player=None
+                    )
+                else:
+                    BracketMatch.objects.filter(pk=bm.feeds_into_id).update(
+                        entry2=None, entry2_player=None
+                    )
+
+            # ── Also clear entry2 on this slot if switching to bye mode ───────
+            if is_bye_request:
+                updates['entry2_id']        = None
+                updates['entry2_player_id'] = None
+
             BracketMatch.objects.filter(pk=bm.pk).update(**updates)
             bm.refresh_from_db()
+
+            # ── If this is now a bye slot, auto-advance the team to R2 ────────
+            if bm.is_bye and bm.feeds_into_id:
+                is_doubles_event = bm.event.match_type in ('DOUBLES', 'MIXED_DOUBLES')
+                if is_doubles_event and bm.entry1_id:
+                    if bm.feeds_as_slot == 1:
+                        BracketMatch.objects.filter(pk=bm.feeds_into_id).update(
+                            entry1_id=bm.entry1_id
+                        )
+                    else:
+                        BracketMatch.objects.filter(pk=bm.feeds_into_id).update(
+                            entry2_id=bm.entry1_id
+                        )
+                elif not is_doubles_event and bm.entry1_player_id:
+                    if bm.feeds_as_slot == 1:
+                        BracketMatch.objects.filter(pk=bm.feeds_into_id).update(
+                            entry1_player_id=bm.entry1_player_id
+                        )
+                    else:
+                        BracketMatch.objects.filter(pk=bm.feeds_into_id).update(
+                            entry2_player_id=bm.entry1_player_id
+                        )
 
         return Response(BracketMatchSerializer(bm).data)
 
@@ -578,6 +623,7 @@ def bracket(self, request, pk=None):
         'is_drawn':        bms.exists(),
         'entry_count':     entry_count,
         'entries':         entries,
+        'bye_count':       bms.filter(round_number=1, is_bye=True).count(),
         'bracket_matches': BracketMatchSerializer(bms, many=True).data,
     })
 

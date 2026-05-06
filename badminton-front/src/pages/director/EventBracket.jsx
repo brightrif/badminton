@@ -1,24 +1,27 @@
 // src/pages/director/EventBracket.jsx
 //
-// Full knockout bracket management page.
+// Bracket layout for 12 teams (draw_size=16, 4 byes):
 //
-// Director workflow:
-//   1. "Generate Bracket"  — POST /api/events/{id}/generate_bracket/
-//   2. R1 slots: "Assign"  — POST /api/bracket-matches/{id}/set_entries/
-//   3. Any slot with both entries: "Schedule" — POST /api/bracket-matches/{id}/schedule_match/
-//   4. Matches complete  →  system auto-fills next round entries
-//   5. Director only needs to "Schedule" (set date/court) for subsequent rounds
+//  R1 (Round of 16)          QF              SF         Final
+//  ┌─────────────┐
+//  │ Team A      │
+//  │ Team B      │ ──winner──►┐
+//  │ Not sched   │            │
+//  │ [Assign]    │            ├──►┐
+//  └─────────────┘            │   │
+//  ┌─────────────┐            │   │
+//  │ Team C      │            │   │
+//  │ (BYE) ——    │ ──auto──►──┘   │
+//  │ BYE         │                │
+//  │ [Assign Bye]│                ├──► ...
+//  └─────────────┘                │
+//  ...                            │
 
 import { useState, useEffect, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext";
 import { useDirectorApi as useApi } from "../../hooks/useDirectorApi";
-import Modal, {
-  FormField,
-  Input,
-  Select,
-  SubmitBtn,
-} from "../../components/Modal";
+import Modal, { FormField, Input, Select } from "../../components/Modal";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -49,21 +52,25 @@ const STATUS_CLR = {
   Upcoming: "#60a5fa",
 };
 
-// ─── Assign Entries Modal (R1 only) ──────────────────────────────────────────
+// ─── Assign Entries Modal ─────────────────────────────────────────────────────
 
-function AssignEntriesModal({ bm, event, onSave, onClose }) {
+function AssignEntriesModal({ bm, event, allBms, isByeMode, onSave, onClose }) {
   const { authFetch } = useAuth();
   const isDoubles = event.match_type !== "SINGLE";
   const allEntries = event.entries || [];
+  // isByeMode comes from the button clicked — overrides bm.is_bye
+  // so any R1 slot can be used as a bye or a real match
+  const isByeSlot = isByeMode ?? bm.is_bye;
+
   const [entry1, setEntry1] = useState(bm.entry1 ? String(bm.entry1) : "");
   const [entry2, setEntry2] = useState(bm.entry2 ? String(bm.entry2) : "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
-  // IDs already assigned in OTHER R1 slots
-  const usedIds = new Set(
-    (event.bracket_matches || [])
-      .filter((s) => s.id !== bm.id && s.round_number === 1)
+  // Teams already used anywhere in the bracket (exclude current slot)
+  const usedAnywhere = new Set(
+    (allBms || [])
+      .filter((s) => s.id !== bm.id)
       .flatMap((s) => [s.entry1, s.entry2, s.entry1_player, s.entry2_player])
       .filter(Boolean)
       .map(String),
@@ -71,26 +78,45 @@ function AssignEntriesModal({ bm, event, onSave, onClose }) {
 
   const available = allEntries.filter(
     (t) =>
-      !usedIds.has(String(t.id)) ||
+      !usedAnywhere.has(String(t.id)) ||
       String(t.id) === entry1 ||
       String(t.id) === entry2,
   );
 
   const handleSave = async () => {
-    if (!entry1 || !entry2) {
-      setError("Please select both entries.");
+    if (!isByeSlot && (!entry1 || !entry2)) {
+      setError("Please select both teams.");
       return;
     }
-    if (entry1 === entry2) {
-      setError("Entry 1 and Entry 2 must be different.");
+    if (isByeSlot && !entry1) {
+      setError("Please select the bye team.");
       return;
     }
+    if (!isByeSlot && entry1 === entry2) {
+      setError("Team 1 and Team 2 must be different.");
+      return;
+    }
+
     setSaving(true);
     setError("");
     try {
-      const body = isDoubles
-        ? { entry1: Number(entry1), entry2: Number(entry2) }
-        : { entry1_player: Number(entry1), entry2_player: Number(entry2) };
+      const body = { is_bye: isByeSlot };
+      if (isByeSlot) {
+        // Bye slot: only entry1 (the team that advances directly)
+        isDoubles
+          ? (body.entry1 = Number(entry1))
+          : (body.entry1_player = Number(entry1));
+      } else {
+        // Normal R1 slot: both entries
+        if (isDoubles) {
+          body.entry1 = Number(entry1);
+          body.entry2 = Number(entry2);
+        } else {
+          body.entry1_player = Number(entry1);
+          body.entry2_player = Number(entry2);
+        }
+      }
+
       const res = await authFetch(
         `/api/bracket-matches/${bm.id}/set_entries/`,
         {
@@ -113,6 +139,7 @@ function AssignEntriesModal({ bm, event, onSave, onClose }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       {error && <div style={S.errBox}>{error}</div>}
+
       <div
         style={{
           fontSize: 13,
@@ -120,28 +147,55 @@ function AssignEntriesModal({ bm, event, onSave, onClose }) {
           lineHeight: 1.5,
         }}
       >
-        Assign who plays in this Round 1 slot. Each entry can only appear once.
+        {isByeSlot
+          ? "Select the team that receives a bye — they advance directly to the next round without playing."
+          : "Assign which two teams play in this slot."}
       </div>
-      <FormField label={isDoubles ? "Team 1 (Side A)" : "Player 1"}>
+
+      {/* Entry 1 — always shown */}
+      <FormField
+        label={
+          isByeSlot
+            ? isDoubles
+              ? "Bye Team"
+              : "Bye Player"
+            : isDoubles
+              ? "Team 1 (Side A)"
+              : "Player 1"
+        }
+      >
         <Select value={entry1} onChange={(e) => setEntry1(e.target.value)}>
           <option value="">— Select —</option>
           {available.map((t) => (
-            <option key={t.id} value={t.id} disabled={String(t.id) === entry2}>
+            <option
+              key={t.id}
+              value={t.id}
+              disabled={!isByeSlot && String(t.id) === entry2}
+            >
               {t.display_name}
             </option>
           ))}
         </Select>
       </FormField>
-      <FormField label={isDoubles ? "Team 2 (Side B)" : "Player 2"}>
-        <Select value={entry2} onChange={(e) => setEntry2(e.target.value)}>
-          <option value="">— Select —</option>
-          {available.map((t) => (
-            <option key={t.id} value={t.id} disabled={String(t.id) === entry1}>
-              {t.display_name}
-            </option>
-          ))}
-        </Select>
-      </FormField>
+
+      {/* Entry 2 — only for real R1 slots */}
+      {!isByeSlot && (
+        <FormField label={isDoubles ? "Team 2 (Side B)" : "Player 2"}>
+          <Select value={entry2} onChange={(e) => setEntry2(e.target.value)}>
+            <option value="">— Select —</option>
+            {available.map((t) => (
+              <option
+                key={t.id}
+                value={t.id}
+                disabled={String(t.id) === entry1}
+              >
+                {t.display_name}
+              </option>
+            ))}
+          </Select>
+        </FormField>
+      )}
+
       <div
         style={{
           display: "flex",
@@ -149,12 +203,6 @@ function AssignEntriesModal({ bm, event, onSave, onClose }) {
           marginTop: 8,
         }}
       >
-        {/* <button style={S.cancelBtn} onClick={onClose}>
-          Cancel
-        </button>
-        <SubmitBtn loading={saving} onClick={handleSave}>
-          Assign
-        </SubmitBtn> */}
         <button type="button" style={S.cancelBtn} onClick={onClose}>
           Cancel
         </button>
@@ -163,7 +211,7 @@ function AssignEntriesModal({ bm, event, onSave, onClose }) {
           onClick={handleSave}
           disabled={saving}
           style={{
-            background: "#c8ff00",
+            background: isByeSlot ? "#fdba74" : "#c8ff00",
             color: "#0a0a0a",
             border: "none",
             borderRadius: 10,
@@ -174,7 +222,7 @@ function AssignEntriesModal({ bm, event, onSave, onClose }) {
             opacity: saving ? 0.6 : 1,
           }}
         >
-          {saving ? "Saving…" : "Assign"}
+          {saving ? "Assigning…" : isByeSlot ? "Assign Bye" : "Assign"}
         </button>
       </div>
     </div>
@@ -305,12 +353,27 @@ function ScheduleMatchModal({ bm, onSave, onClose }) {
           marginTop: 8,
         }}
       >
-        <button style={S.cancelBtn} onClick={onClose}>
+        <button type="button" style={S.cancelBtn} onClick={onClose}>
           Cancel
         </button>
-        <SubmitBtn loading={saving} onClick={handleSave}>
-          {existing ? "Update Schedule" : "Schedule Match"}
-        </SubmitBtn>
+        <button
+          type="button"
+          onClick={handleSave}
+          disabled={saving}
+          style={{
+            background: "#c8ff00",
+            color: "#0a0a0a",
+            border: "none",
+            borderRadius: 10,
+            padding: "13px 24px",
+            fontSize: 14,
+            fontWeight: 700,
+            cursor: saving ? "not-allowed" : "pointer",
+            opacity: saving ? 0.6 : 1,
+          }}
+        >
+          {saving ? "Saving…" : existing ? "Update Schedule" : "Schedule Match"}
+        </button>
       </div>
     </div>
   );
@@ -318,20 +381,50 @@ function ScheduleMatchModal({ bm, onSave, onClose }) {
 
 // ─── Match Card ───────────────────────────────────────────────────────────────
 
-function MatchCard({ bm, event, isR1, onAssign, onSchedule }) {
+function MatchCard({ bm, event, allBms, onAssign, onSchedule }) {
   const m = bm.match_detail;
-  const isBye = bm.is_bye;
-  const bothAssigned =
-    bm.entry1_name !== "TBD" && bm.entry2_name !== "TBD" && !isBye;
+  const isByeSlot = bm.is_bye;
+
+  const entry1Filled = bm.entry1_name && bm.entry1_name !== "TBD";
+  const entry2Filled =
+    bm.entry2_name && bm.entry2_name !== "TBD" && bm.entry2_name !== "—";
+  const bothAssigned = entry1Filled && entry2Filled;
+  const isR1 = bm.round_number === 1;
+  const isUnassigned = !m && (!entry1Filled || (!isByeSlot && !entry2Filled));
+
   const t1won = m?.status === "Completed" && m.team1_sets > m.team2_sets;
   const t2won = m?.status === "Completed" && m.team2_sets > m.team1_sets;
   const clr = STATUS_CLR[m?.status] || "rgba(80,80,100,0.8)";
 
+  // Card border/bg varies: bye=orange tint, normal=default, r2+ tbd=faded
+  const cardStyle = {
+    ...S.card,
+    ...(isByeSlot
+      ? {
+          borderColor: "rgba(255,160,80,0.25)",
+          background: "rgba(255,160,80,0.04)",
+        }
+      : {}),
+    ...(!bothAssigned && !isByeSlot && bm.round_number > 1 ? S.cardTbd : {}),
+  };
+
   return (
-    <div style={{ ...S.card, ...(!bothAssigned && !isR1 ? S.cardTbd : {}) }}>
+    <div style={cardStyle}>
       {/* Entry 1 */}
       <div style={{ ...S.entry, ...(t1won ? S.entryWon : {}) }}>
-        <span style={S.entryName}>{bm.entry1_name}</span>
+        <span
+          style={{
+            ...S.entryName,
+            color:
+              isByeSlot && entry1Filled
+                ? "#fdba74"
+                : isByeSlot && !entry1Filled
+                  ? "rgba(255,255,255,0.3)"
+                  : "#fff",
+          }}
+        >
+          {isByeSlot && !entry1Filled ? "— Bye Team —" : bm.entry1_name}
+        </span>
         {m?.status === "Completed" && (
           <span style={S.sets}>{m.team1_sets}</span>
         )}
@@ -339,7 +432,7 @@ function MatchCard({ bm, event, isR1, onAssign, onSchedule }) {
 
       <div style={S.cardDivider} />
 
-      {/* Entry 2 */}
+      {/* Entry 2 — shows "advances directly" for bye slots */}
       <div
         style={{
           ...S.entry,
@@ -347,15 +440,35 @@ function MatchCard({ bm, event, isR1, onAssign, onSchedule }) {
           borderBottom: "none",
         }}
       >
-        <span style={S.entryName}>{isBye ? "BYE" : bm.entry2_name}</span>
-        {m?.status === "Completed" && (
-          <span style={S.sets}>{m.team2_sets}</span>
+        {isByeSlot ? (
+          <span
+            style={{
+              fontSize: 10,
+              color: "rgba(255,160,80,0.5)",
+              fontStyle: "italic",
+            }}
+          >
+            advances directly →
+          </span>
+        ) : (
+          <>
+            <span style={S.entryName}>{bm.entry2_name}</span>
+            {m?.status === "Completed" && (
+              <span style={S.sets}>{m.team2_sets}</span>
+            )}
+          </>
         )}
       </div>
 
-      {/* Status / time strip */}
-      <div style={{ ...S.statusStrip, background: clr }}>
-        {isBye
+      {/* Status strip */}
+      <div
+        style={{
+          ...S.statusStrip,
+          background: isByeSlot ? "rgba(255,160,80,0.35)" : clr,
+          color: "rgba(0,0,0,0.75)",
+        }}
+      >
+        {isByeSlot
           ? "BYE"
           : m?.scheduled_time
             ? new Date(m.scheduled_time).toLocaleString("en-GB", {
@@ -365,19 +478,69 @@ function MatchCard({ bm, event, isR1, onAssign, onSchedule }) {
                 minute: "2-digit",
               })
             : m?.status || "Not scheduled"}
-        {m?.court_name && (
+        {!isByeSlot && m?.court_name && (
           <span style={{ marginLeft: 5, opacity: 0.7 }}>· {m.court_name}</span>
         )}
       </div>
 
-      {/* Action buttons */}
+      {/* Actions */}
       <div style={S.cardActions}>
-        {isR1 && !isBye && !m && (
-          <button style={S.assignBtn} onClick={() => onAssign(bm)}>
-            Assign
+        {/* R1 unassigned: show BOTH Assign and Assign Bye buttons */}
+        {isR1 && isUnassigned && (
+          <>
+            <button style={S.assignBtn} onClick={() => onAssign(bm, false)}>
+              Assign
+            </button>
+            <button
+              style={{
+                ...S.assignBtn,
+                background: "rgba(255,160,80,0.12)",
+                color: "#fdba74",
+                borderColor: "rgba(255,160,80,0.3)",
+              }}
+              onClick={() => onAssign(bm, true)}
+            >
+              Bye
+            </button>
+          </>
+        )}
+
+        {/* R1 bye slot assigned — show "✓" and allow re-assign */}
+        {isR1 && isByeSlot && entry1Filled && (
+          <div
+            style={{ display: "flex", gap: 4, flex: 1, alignItems: "center" }}
+          >
+            <span
+              style={{
+                fontSize: 10,
+                color: "rgba(255,160,80,0.6)",
+                flex: 1,
+                paddingLeft: 4,
+              }}
+            >
+              ✓ bye
+            </span>
+            <button
+              style={{ ...S.editBtn, fontSize: 9 }}
+              onClick={() => onAssign(bm, true)}
+            >
+              Change
+            </button>
+          </div>
+        )}
+
+        {/* R1 real slot assigned — show Schedule */}
+        {isR1 && !isByeSlot && bothAssigned && (
+          <button
+            style={m ? S.editBtn : S.scheduleBtn}
+            onClick={() => onSchedule(bm)}
+          >
+            {m ? "✎ Edit" : "Schedule"}
           </button>
         )}
-        {bothAssigned && (
+
+        {/* R2+ slots — schedule when both filled */}
+        {!isR1 && bothAssigned && (
           <button
             style={m ? S.editBtn : S.scheduleBtn}
             onClick={() => onSchedule(bm)}
@@ -400,6 +563,7 @@ function KnockoutBracket({ event, bracketMatches, onRefresh }) {
   const totalRounds = roundNums.length;
 
   const [assigningBm, setAssigningBm] = useState(null);
+  const [isByeMode, setIsByeMode] = useState(false);
   const [schedulingBm, setSchedulingBm] = useState(null);
 
   return (
@@ -423,8 +587,11 @@ function KnockoutBracket({ event, bracketMatches, onRefresh }) {
                       <MatchCard
                         bm={bm}
                         event={event}
-                        isR1={rnd === 1}
-                        onAssign={setAssigningBm}
+                        allBms={bracketMatches}
+                        onAssign={(bm, asBye) => {
+                          setAssigningBm(bm);
+                          setIsByeMode(asBye);
+                        }}
                         onSchedule={setSchedulingBm}
                       />
                     </div>
@@ -467,24 +634,39 @@ function KnockoutBracket({ event, bracketMatches, onRefresh }) {
         </div>
       </div>
 
+      {/* Assign modal */}
       {assigningBm && (
         <Modal
-          title={`Assign — Round 1 · Slot ${assigningBm.position}`}
-          onClose={() => setAssigningBm(null)}
+          title={
+            isByeMode
+              ? `Assign Bye — Slot ${assigningBm.position}`
+              : `Assign — Round 1 · Slot ${assigningBm.position}`
+          }
+          onClose={() => {
+            setAssigningBm(null);
+            setIsByeMode(false);
+          }}
           width={460}
         >
           <AssignEntriesModal
             bm={assigningBm}
             event={event}
+            allBms={bracketMatches}
+            isByeMode={isByeMode}
             onSave={() => {
               setAssigningBm(null);
+              setIsByeMode(false);
               onRefresh();
             }}
-            onClose={() => setAssigningBm(null)}
+            onClose={() => {
+              setAssigningBm(null);
+              setIsByeMode(false);
+            }}
           />
         </Modal>
       )}
 
+      {/* Schedule modal */}
       {schedulingBm && (
         <Modal
           title={`Schedule — ${schedulingBm.entry1_name} vs ${schedulingBm.entry2_name}`}
@@ -559,12 +741,7 @@ export default function EventBracket() {
   };
 
   const handleReset = async () => {
-    if (
-      !confirm(
-        "Reset the bracket? All assignments will be cleared. This fails if any match has been played.",
-      )
-    )
-      return;
+    if (!confirm("Reset the bracket? All assignments will be cleared.")) return;
     setResetting(true);
     try {
       const res = await authFetch(`/api/events/${id}/reset_bracket/`, {
@@ -589,10 +766,10 @@ export default function EventBracket() {
   const played = bms.filter(
     (b) => b.match_detail?.status === "Completed",
   ).length;
-  const r1Total = bms.filter((b) => b.round_number === 1 && !b.is_bye).length;
-  const r1Assigned = bms.filter(
-    (b) => b.round_number === 1 && !b.is_bye && (b.entry1 || b.entry1_player),
-  ).length;
+  const r1Real = bms.filter((b) => b.round_number === 1 && !b.is_bye);
+  const r1Total = r1Real.length;
+  const r1Assigned = r1Real.filter((b) => b.entry1 || b.entry1_player).length;
+  const byeCount = event.bye_count || 0;
 
   return (
     <div style={S.page}>
@@ -607,6 +784,11 @@ export default function EventBracket() {
           <div style={S.title}>{event.name}</div>
           <div style={S.sub}>
             {event.tournament_name} · Knockout · {event.entry_count} entries
+            {byeCount > 0 && (
+              <span style={{ color: "#fdba74", marginLeft: 8 }}>
+                · {byeCount} bye{byeCount > 1 ? "s" : ""}
+              </span>
+            )}
           </div>
         </div>
         {event.is_drawn && (
@@ -626,7 +808,7 @@ export default function EventBracket() {
         )}
       </div>
 
-      {/* Status pills */}
+      {/* Pills */}
       {event.is_drawn && (
         <div style={S.pillRow}>
           {[
@@ -661,14 +843,14 @@ export default function EventBracket() {
       )}
 
       {!event.is_drawn ? (
-        /* ── Not generated yet ── */
         <div style={S.notDrawn}>
           <div style={{ fontSize: 52 }}>🏆</div>
           <div style={S.notDrawnTitle}>Bracket not generated yet</div>
           <div style={S.notDrawnSub}>
-            {event.entry_count} entries registered. Generate the bracket to
-            create all round slots, then assign which team plays in each Round 1
-            slot and schedule their match times.
+            {event.entry_count} entries registered.
+            {event.entry_count > 0 &&
+              !isPowerOf2(event.entry_count) &&
+              ` ${nextPow2(event.entry_count) - event.entry_count} team(s) will receive byes and advance directly to Round 2.`}
           </div>
           <button
             style={S.generateBtn}
@@ -677,35 +859,26 @@ export default function EventBracket() {
           >
             {generating ? "Generating…" : "⚡ Generate Bracket"}
           </button>
-          {event.entry_count < 2 && (
-            <div style={{ color: "#f87171", fontSize: 13, marginTop: 8 }}>
-              Need at least 2 entries to generate a bracket.
-            </div>
-          )}
         </div>
       ) : (
         <>
-          {/* ── Director guide ── */}
           {r1Assigned < r1Total && (
             <div style={S.guideBanner}>
               <strong style={{ color: "#fdba74" }}>
-                Step 1 — Assign Round 1:
+                Assign Round 1 slots:
               </strong>{" "}
-              Click <strong>Assign</strong> on each Round 1 card to choose which
-              teams play. From Round 2 onwards the system fills teams
-              automatically once R1 results are in. Then click{" "}
-              <strong>Schedule</strong> on any filled card to set the date and
-              court.
-            </div>
-          )}
-          {r1Assigned === r1Total && played < r1Total && (
-            <div style={S.guideBanner}>
-              <strong style={{ color: "#c8ff00" }}>
-                All Round 1 slots assigned.
-              </strong>{" "}
-              Click <strong>Schedule</strong> on each match to set the date and
-              court. As Round 1 results come in, the system will automatically
-              populate Round 2 slots.
+              Click <strong>Assign</strong> on each match slot.
+              {byeCount > 0 && (
+                <>
+                  {" "}
+                  For the{" "}
+                  <strong style={{ color: "#fdba74" }}>
+                    {byeCount} bye slot{byeCount > 1 ? "s" : ""}
+                  </strong>
+                  , click <strong>Assign Bye</strong> — that team advances
+                  directly to Round 2.
+                </>
+              )}
             </div>
           )}
 
@@ -732,6 +905,13 @@ export default function EventBracket() {
       )}
     </div>
   );
+}
+
+function isPowerOf2(n) {
+  return n > 0 && (n & (n - 1)) === 0;
+}
+function nextPow2(n) {
+  return Math.pow(2, Math.ceil(Math.log2(n)));
 }
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
@@ -789,7 +969,6 @@ const S = {
     color: "#fff",
   },
   sub: { fontSize: 13, color: "rgba(255,255,255,0.35)", marginTop: 3 },
-
   progressWrap: { marginLeft: "auto", textAlign: "right", flexShrink: 0 },
   progressBar: {
     width: 160,
@@ -817,7 +996,6 @@ const S = {
     gap: 2,
     alignItems: "center",
   },
-
   guideBanner: {
     background: "rgba(255,200,80,0.06)",
     border: "1px solid rgba(255,200,80,0.15)",
@@ -906,7 +1084,7 @@ const S = {
     fontSize: 12,
     color: "#fff",
     fontWeight: 500,
-    maxWidth: 110,
+    maxWidth: 115,
     overflow: "hidden",
     textOverflow: "ellipsis",
     whiteSpace: "nowrap",
@@ -925,6 +1103,7 @@ const S = {
     gap: 4,
     padding: "5px 6px",
     background: "rgba(255,255,255,0.02)",
+    minHeight: 30,
   },
   assignBtn: {
     flex: 1,
@@ -986,7 +1165,6 @@ const S = {
     fontSize: 13,
     cursor: "pointer",
   },
-
   resetZone: {
     display: "flex",
     alignItems: "center",

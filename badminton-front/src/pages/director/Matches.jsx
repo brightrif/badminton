@@ -28,7 +28,7 @@ const SCORING_FORMATS = [
 
 // ─── Match row ────────────────────────────────────────────────────────────────
 
-function MatchRow({ m, onEdit, onDelete }) {
+function MatchRow({ m, onEdit, onDelete, editLoadingId }) {
   const t1 =
     [m.player1_team1_name, m.player2_team1_name].filter(Boolean).join(" / ") ||
     "TBD";
@@ -76,8 +76,12 @@ function MatchRow({ m, onEdit, onDelete }) {
         </div>
       )}
       <div style={S.rowActions}>
-        <button style={S.editBtn} onClick={() => onEdit(m)}>
-          Edit
+        <button
+          style={S.editBtn}
+          onClick={() => onEdit(m)}
+          disabled={editLoadingId === m.id}
+        >
+          {editLoadingId === m.id ? "…" : "Edit"}
         </button>
         <button style={S.delBtn} onClick={() => onDelete(m)}>
           ✕
@@ -127,7 +131,26 @@ function MatchForm({ initial, onSave, onClose }) {
   // Selected team IDs (for the two sides)
   const [selectedTeam1Id, setSelectedTeam1Id] = useState("");
   const [selectedTeam2Id, setSelectedTeam2Id] = useState("");
+  // ── Pre-select teams when editing (find teams matching the initial player IDs) ──
+  useEffect(() => {
+    if (!initial || eventTeams.length === 0) return;
 
+    const p1t1 = String(initial.player1_team1 || "");
+    const p2t1 = String(initial.player2_team1 || "");
+    const p1t2 = String(initial.player1_team2 || "");
+    const p2t2 = String(initial.player2_team2 || "");
+
+    // Find team whose player1+player2 match the form's team1 players
+    const matchedTeam1 = eventTeams.find(
+      (t) => String(t.player1_id) === p1t1 && String(t.player2_id) === p2t1,
+    );
+    const matchedTeam2 = eventTeams.find(
+      (t) => String(t.player1_id) === p1t2 && String(t.player2_id) === p2t2,
+    );
+
+    if (matchedTeam1) setSelectedTeam1Id(String(matchedTeam1.id));
+    if (matchedTeam2) setSelectedTeam2Id(String(matchedTeam2.id));
+  }, [eventTeams, initial]);
   // ── Load registered players when event changes ─────────────────────────────
   const loadEventPlayers = useCallback(
     async (eventId) => {
@@ -662,6 +685,20 @@ export default function Matches() {
   const { data: matches, loading, refresh } = useApi("/api/matches/");
   const [showCreate, setShowCreate] = useState(false);
   const [editing, setEditing] = useState(null);
+  const [editLoading, setEditLoading] = useState(null); // holds ID of match being fetched
+
+  const handleEdit = async (m) => {
+    setEditLoading(m.id);
+    try {
+      const res = await authFetch(`/api/matches/${m.id}/`);
+      const full = await res.json();
+      setEditing(full);
+    } catch {
+      setEditing(m); // fallback to list data
+    } finally {
+      setEditLoading(null);
+    }
+  };
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState("");
 
@@ -777,8 +814,9 @@ export default function Matches() {
             <MatchRow
               key={m.id}
               m={m}
-              onEdit={setEditing}
+              onEdit={handleEdit}
               onDelete={handleDelete}
+              editLoadingId={editLoading}
             />
           ))}
         </div>

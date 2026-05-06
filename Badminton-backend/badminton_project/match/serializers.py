@@ -178,10 +178,12 @@ class MatchSerializer(serializers.ModelSerializer):
     current_game_score = serializers.SerializerMethodField()
     match_winner = serializers.SerializerMethodField()
 
+    event_name = serializers.CharField(source='event.name', read_only=True, default=None)
+    
     class Meta:
         model = Match
         fields = [
-            'id', 'tournament', 'tournament_name', 'match_type',
+            'id', 'tournament', 'tournament_name', 'match_type','event', 'event_name',
             'player1_team1', 'player1_team1_detail',
             'player2_team1', 'player2_team1_detail',
             'player1_team2', 'player1_team2_detail',
