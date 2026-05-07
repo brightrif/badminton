@@ -614,7 +614,7 @@ const S = {
   // Shared match summary
   selectedMatch: {
     background: "rgba(232,255,71,0.06)",
-    border: "1px solid rgba(232,255,71,0.15)",
+    border: "1px solid rgba(200,255,0,0.15)",
     borderRadius: "12px",
     padding: "14px 16px",
     marginBottom: "20px",
@@ -676,7 +676,7 @@ const S = {
     fontWeight: 500,
     transition: "all 0.15s",
   },
-  modeBtnActive: { background: "rgba(232,255,71,0.12)", color: "#e8ff47" },
+  modeBtnActive: { background: "rgba(232,255,71,0.12)", color: "#c8ff00" },
 
   // PIN inputs
   digitRow: {
@@ -743,7 +743,7 @@ const S = {
   submitBtn: {
     width: "100%",
     padding: "16px",
-    background: "linear-gradient(135deg, #e8ff47, #c8ff00)",
+    background: "linear-gradient(135deg, #c8ff00, #c8ff00)",
     border: "none",
     borderRadius: "12px",
     color: "#0a0a0a",

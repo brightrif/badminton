@@ -6,12 +6,11 @@ from django.conf import settings
 from rest_framework import viewsets, filters, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
-from rest_framework.permissions import AllowAny
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from django_filters.rest_framework import DjangoFilterBackend
 from django.db.models import Q
 from django.utils import timezone
 from rest_framework_simplejwt.authentication import JWTAuthentication
-from rest_framework.permissions import IsAuthenticated
 
 from .models import (
     Country, Tournament, Player, Sponsor, Match, GameScore, Venue,
@@ -23,29 +22,14 @@ from .serializers import (
     MatchCreateUpdateSerializer, GameScoreSerializer, VenueSerializer,
     VenueListSerializer, TournamentVenueSerializer, CourtSerializer
 )
-
 from .token_auth import make_token, verify_token
-# ─── Token helpers ────────────────────────────────────────────────────────────
-# We use a simple HMAC token so we need NO extra packages.
-# Format:  <match_id>:<timestamp>:<hmac>
-# The token is valid for TOKEN_TTL_SECONDS after issue.
-# The umpire stores it in localStorage and sends it in the WS handshake.
 
-TOKEN_TTL_SECONDS = 60 * 60 * 12   # 12 hours — covers a full match day
-
-
-# def _make_token(match_id: int) -> str:
-#     ts = int(time.time())
-#     payload = f"{match_id}:{ts}"
-#     secret = getattr(settings, 'SECRET_KEY', 'fallback-secret')
-#     sig = hmac.new(secret.encode(), payload.encode(), hashlib.sha256).hexdigest()
-#     return f"{payload}:{sig}"
-
-
+TOKEN_TTL_SECONDS = 60 * 60 * 12   # 12 hours
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-
+# Country
+# ─────────────────────────────────────────────────────────────────────────────
 
 class CountryViewSet(viewsets.ModelViewSet):
     queryset = Country.objects.all()
@@ -71,6 +55,10 @@ class CountryViewSet(viewsets.ModelViewSet):
         serializer = VenueListSerializer(country.venues.all(), many=True)
         return Response(serializer.data)
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Venue
+# ─────────────────────────────────────────────────────────────────────────────
 
 class VenueViewSet(viewsets.ModelViewSet):
     queryset = Venue.objects.all()
@@ -112,6 +100,10 @@ class VenueViewSet(viewsets.ModelViewSet):
         return Response(serializer.data)
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Court
+# ─────────────────────────────────────────────────────────────────────────────
+
 class CourtViewSet(viewsets.ModelViewSet):
     queryset = Court.objects.all()
     serializer_class = CourtSerializer
@@ -131,6 +123,10 @@ class CourtViewSet(viewsets.ModelViewSet):
         serializer = MatchListSerializer(court.matches.all(), many=True)
         return Response(serializer.data)
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Tournament
+# ─────────────────────────────────────────────────────────────────────────────
 
 class TournamentViewSet(viewsets.ModelViewSet):
     queryset = Tournament.objects.all()
@@ -182,6 +178,10 @@ class TournamentViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(qs, many=True)
         return Response(serializer.data)
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Player
+# ─────────────────────────────────────────────────────────────────────────────
 
 class PlayerViewSet(viewsets.ModelViewSet):
     queryset = Player.objects.all()
@@ -235,6 +235,10 @@ class PlayerViewSet(viewsets.ModelViewSet):
         return Response(serializer.data)
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Match
+# ─────────────────────────────────────────────────────────────────────────────
+
 class MatchViewSet(viewsets.ModelViewSet):
     queryset = Match.objects.all()
     serializer_class = MatchSerializer
@@ -250,7 +254,7 @@ class MatchViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         return Match.objects.select_related(
-            'tournament', 'venue', 'court',
+            'tournament', 'venue', 'court','event','assigned_umpire',
             'player1_team1__country', 'player2_team1__country',
             'player1_team2__country', 'player2_team2__country',
             'server__country'
@@ -263,7 +267,7 @@ class MatchViewSet(viewsets.ModelViewSet):
             return MatchCreateUpdateSerializer
         return MatchSerializer
 
-    # ── Existing endpoints (unchanged) ───────────────────────────────────────
+    # ── List endpoints ────────────────────────────────────────────────────────
 
     @action(detail=False, methods=['get'])
     def live(self, request):
@@ -282,6 +286,53 @@ class MatchViewSet(viewsets.ModelViewSet):
             self.get_queryset().filter(scheduled_time__date=today), many=True
         )
         return Response(serializer.data)
+
+    @action(detail=False, methods=['get'],url_path='umpires', permission_classes=[AllowAny])
+    def umpires(self, request):
+        """Return all active users to populate the umpire assign dropdown."""
+        from django.contrib.auth import get_user_model
+        User = get_user_model()
+        users = list(
+            User.objects.filter(is_active=True, groups__name='umpires')
+            .values('id', 'username', 'first_name', 'last_name')
+            .order_by('first_name', 'username')
+        )
+        return Response(users)
+
+    # ── my_matches — returns matches assigned to the logged-in umpire ─────────
+
+    @action(
+        detail=False,
+        methods=['get'],
+        url_path='my_matches',
+        authentication_classes=[JWTAuthentication],
+        permission_classes=[IsAuthenticated],
+    )
+    def my_matches(self, request):
+        """
+        GET /api/matches/my_matches/
+        Header: Authorization: Bearer <jwt>
+
+        Returns matches assigned to the authenticated umpire, split by status.
+        """
+        qs = (
+            self.get_queryset()
+            .filter(assigned_umpire=request.user)
+            .order_by('scheduled_time')
+        )
+
+        live      = qs.filter(status='Live')
+        upcoming  = qs.filter(status='Upcoming')
+        completed = qs.filter(status='Completed').order_by('-scheduled_time')[:10]
+
+        ctx = {'request': request}
+        return Response({
+            'live':      MatchListSerializer(live,      many=True, context=ctx).data,
+            'upcoming':  MatchListSerializer(upcoming,  many=True, context=ctx).data,
+            'completed': MatchListSerializer(completed, many=True, context=ctx).data,
+        })
+
+    # ── Detail endpoints ──────────────────────────────────────────────────────
 
     @action(detail=True, methods=['post'])
     def update_score(self, request, pk=None):
@@ -328,34 +379,27 @@ class MatchViewSet(viewsets.ModelViewSet):
         match.refresh_from_db()
         return Response(MatchSerializer(match).data)
 
-    # ── NEW: PIN verification ─────────────────────────────────────────────────
-    @action(detail=True, methods=['post'], url_path='verify_pin',
-            authentication_classes=[],
-            permission_classes=[AllowAny])
+    @action(
+        detail=True,
+        methods=['post'],
+        url_path='verify_pin',
+        authentication_classes=[],
+        permission_classes=[AllowAny],
+    )
     def verify_pin(self, request, pk=None):
         """
         POST /api/matches/<id>/verify_pin/
         Body: { "pin": "1234" }
-
-        Returns a short-lived HMAC token the umpire stores in localStorage.
-        The token is later sent as a query param when opening the WebSocket:
-            ws://host/ws/match/<id>/?token=<token>
+        Returns a short-lived HMAC token for WebSocket umpire access.
         """
         match = self.get_object()
         pin = str(request.data.get('pin', '')).strip()
 
         if not pin:
-            return Response(
-                {'error': 'PIN is required.'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+            return Response({'error': 'PIN is required.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Constant-time comparison to prevent timing attacks
         if not hmac.compare_digest(match.umpire_pin, pin):
-            return Response(
-                {'error': 'Invalid PIN.'},
-                status=status.HTTP_403_FORBIDDEN
-            )
+            return Response({'error': 'Invalid PIN.'}, status=status.HTTP_403_FORBIDDEN)
 
         token = make_token(match.id)
         return Response({
@@ -363,66 +407,46 @@ class MatchViewSet(viewsets.ModelViewSet):
             'match_id': match.id,
             'expires_in_seconds': TOKEN_TTL_SECONDS,
         })
-    @action(detail=False, methods=['get'], url_path='umpires',
-            permission_classes=[AllowAny])
-    def umpires(self, request):
-        """Return all active users to populate the umpire assign dropdown."""
-        from django.contrib.auth import get_user_model
-        User = get_user_model()
-        users = list(
-            User.objects.filter(is_active=True)
-            .values('id', 'username', 'first_name', 'last_name')
-            .order_by('first_name', 'username')
-        )
-        return Response(users)
-    # ─────────────────────────────────────────────────────────────────────────
-    @action(detail=True, methods=['post'], url_path='umpire_token',
-        authentication_classes=[JWTAuthentication],permission_classes=[IsAuthenticated])
+
+    @action(
+        detail=True,
+        methods=['post'],
+        url_path='umpire_token',
+        authentication_classes=[JWTAuthentication],
+        permission_classes=[IsAuthenticated],
+    )
     def umpire_token(self, request, pk=None):
         """
         POST /api/matches/<id>/umpire_token/
         Header: Authorization: Bearer <jwt>
 
-        For umpires who log in with username/password instead of PIN.
-        Issues the same HMAC token so the WS consumer needs no changes.
+        Issues an HMAC token for WebSocket access.
+        Granted if the umpire is assigned to the match, or is staff/director.
         """
         match = self.get_object()
+        user  = request.user
+
+        is_assigned   = match.assigned_umpire_id is not None and match.assigned_umpire_id == user.pk
+        is_privileged = user.is_staff or getattr(user, 'role', '') in ('director', 'admin')
+
+        if not is_assigned and not is_privileged:
+            return Response(
+                {'error': 'You are not assigned to this match.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
         token = make_token(match.id)
         return Response({
             'token': token,
             'match_id': match.id,
             'expires_in_seconds': TOKEN_TTL_SECONDS,
         })
-    # Inside MatchViewSet, add this action:
-    @action(detail=False, methods=['get'], 
-            permission_classes=[IsAuthenticated],
-            authentication_classes=[JWTAuthentication])
-    def my_matches(self, request):
-        """
-        Returns all matches for the authenticated user's linked player profile.
-        GET /api/matches/my_matches/
-        GET /api/matches/my_matches/?status=Live
-        """
-        player = getattr(request.user, 'player', None)
-        if player is None:
-            return Response(
-                {'detail': 'No player profile linked to your account.'},
-                status=status.HTTP_404_NOT_FOUND
-            )
 
-        qs = self.get_queryset().filter(
-            Q(player1_team1=player) | Q(player2_team1=player) |
-            Q(player1_team2=player) | Q(player2_team2=player)
-        )
 
-        status_filter = request.query_params.get('status')
-        if status_filter:
-            qs = qs.filter(status=status_filter)
+# ─────────────────────────────────────────────────────────────────────────────
+# Sponsor
+# ─────────────────────────────────────────────────────────────────────────────
 
-        serializer = MatchListSerializer(qs, many=True)
-        return Response(serializer.data)
-    
-    
 class SponsorViewSet(viewsets.ModelViewSet):
     queryset = Sponsor.objects.all()
     serializer_class = SponsorSerializer
@@ -437,6 +461,10 @@ class SponsorViewSet(viewsets.ModelViewSet):
         return Sponsor.objects.select_related('tournament')
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# GameScore
+# ─────────────────────────────────────────────────────────────────────────────
+
 class GameScoreViewSet(viewsets.ModelViewSet):
     queryset = GameScore.objects.all()
     serializer_class = GameScoreSerializer
@@ -450,6 +478,10 @@ class GameScoreViewSet(viewsets.ModelViewSet):
         return GameScore.objects.select_related('match')
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# TournamentVenue
+# ─────────────────────────────────────────────────────────────────────────────
+
 class TournamentVenueViewSet(viewsets.ModelViewSet):
     queryset = TournamentVenue.objects.all()
     serializer_class = TournamentVenueSerializer
@@ -461,96 +493,3 @@ class TournamentVenueViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         return TournamentVenue.objects.select_related('tournament', 'venue')
-    
-
-# ── Action 1: my_matches ──────────────────────────────────────────────────────
-# Returns only matches assigned to the currently logged-in umpire.
-# Used by the UmpireDashboard to populate the match list.
-#
-# GET /api/matches/my_matches/
-# Header: Authorization: Bearer <jwt>
- 
-@action(
-    detail=False,
-    methods=['get'],
-    url_path='my_matches',
-    authentication_classes=[JWTAuthentication],
-    permission_classes=[IsAuthenticated],
-)
-def my_matches(self, request):
-    """
-    Return matches assigned to the authenticated umpire, split by status.
-    """
-    umpire = request.user
- 
-    qs = (
-        self.get_queryset()
-        .filter(assigned_umpire=umpire)
-        .select_related(
-            'tournament', 'player1_team1', 'player1_team2',
-            'player2_team1', 'player2_team2', 'venue', 'court',
-        )
-        .order_by('scheduled_time')
-    )
- 
-    live      = qs.filter(status='Live')
-    upcoming  = qs.filter(status='Upcoming')
-    completed = qs.filter(status='Completed').order_by('-scheduled_time')[:10]
- 
-    from .serializers import MatchListSerializer
-    ctx = {'request': request}
- 
-    return Response({
-        'live':      MatchListSerializer(live,      many=True, context=ctx).data,
-        'upcoming':  MatchListSerializer(upcoming,  many=True, context=ctx).data,
-        'completed': MatchListSerializer(completed, many=True, context=ctx).data,
-    })
- 
- 
-# ── Action 2: umpire_token (updated — already exists, add assignment check) ───
-# This replaces the existing umpire_token action.
-# If the umpire is assigned to the match, issue the HMAC token automatically.
-# No PIN needed — JWT + assignment is proof enough.
-#
-# POST /api/matches/<id>/umpire_token/
-# Header: Authorization: Bearer <jwt>
- 
-@action(
-    detail=True,
-    methods=['post'],
-    url_path='umpire_token',
-    authentication_classes=[JWTAuthentication],
-    permission_classes=[IsAuthenticated],
-)
-def umpire_token(self, request, pk=None):
-    """
-    Issue an HMAC umpire token for WebSocket access.
- 
-    Two cases:
-      1. Umpire is assigned to this match  → token issued automatically.
-      2. Umpire is not assigned (superuser/director override) → token issued
-         only if the user is staff or has director role.
- 
-    The WS consumer is unchanged — it still validates the same HMAC token.
-    """
-    match = self.get_object()
-    user  = request.user
- 
-    is_assigned = (
-        match.assigned_umpire_id is not None and
-        match.assigned_umpire_id == user.pk
-    )
-    is_privileged = user.is_staff or getattr(user, 'role', '') in ('director', 'admin')
- 
-    if not is_assigned and not is_privileged:
-        return Response(
-            {'error': 'You are not assigned to this match.'},
-            status=status.HTTP_403_FORBIDDEN,
-        )
- 
-    token = make_token(match.id)
-    return Response({
-        'token':              token,
-        'match_id':           match.id,
-        'expires_in_seconds': TOKEN_TTL_SECONDS,
-    })

@@ -252,6 +252,8 @@ class MatchListSerializer(serializers.ModelSerializer):
     tournament_name = serializers.CharField(source='tournament.name', read_only=True)
     venue_name = serializers.CharField(source='venue.name', read_only=True)
     court_name = serializers.CharField(source='court.name', read_only=True)
+
+    event_name = serializers.CharField(source='event.name', read_only=True, default=None)
     
     # Simple player names
     player1_team1_name = serializers.CharField(source='player1_team1.name', read_only=True)
@@ -259,14 +261,21 @@ class MatchListSerializer(serializers.ModelSerializer):
     player1_team2_name = serializers.CharField(source='player1_team2.name', read_only=True)
     player2_team2_name = serializers.CharField(source='player2_team2.name', read_only=True)
 
+    assigned_umpire_name = serializers.CharField(
+        source='assigned_umpire.get_full_name', read_only=True, default=None
+    )
+
+    # umpire_pin = serializers.CharField(source='umpire_pin', read_only=True, default=None)
     class Meta:
         model = Match
         fields = [
             'id','tournament', 'tournament_name', 'match_type', 'status',
+            'event','event_name',
             'player1_team1_name', 'player2_team1_name',
             'player1_team2_name', 'player2_team2_name',
             'scheduled_time', 'team1_sets', 'team2_sets',
-            'venue_name', 'court_name','scoring_format'
+            'venue_name', 'court_name','scoring_format',
+            'assigned_umpire', 'assigned_umpire_name','umpire_pin',
         ]
 
 
@@ -277,12 +286,12 @@ class MatchCreateUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Match
         fields = [
-            'tournament', 'match_type',
+            'tournament', 'match_type','event',
             'player1_team1', 'player2_team1',
             'player1_team2', 'player2_team2',
             'server', 'scheduled_time', 'status',
             'current_game', 'team1_sets', 'team2_sets',
-            'venue', 'court', 'game_scores','scoring_format'
+            'venue', 'court', 'game_scores','scoring_format','assigned_umpire',
         ]
 
     @transaction.atomic

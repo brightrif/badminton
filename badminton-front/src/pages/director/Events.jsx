@@ -689,7 +689,7 @@ function EventCard({
         <button style={S.delBtn} onClick={() => onDelete(ev)}>
           Delete
         </button>
-        <button style={S.bracketBtn} onClick={() => onViewBracket(ev)}>
+        <button style={S.vbracketBtn} onClick={() => onViewBracket(ev)}>
           View Bracket
         </button>
       </div>
@@ -960,7 +960,8 @@ const S = {
   },
   grid: {
     display: "grid",
-    gridTemplateColumns: "repeat(auto-fill, minmax(380px, 1fr))",
+    // gridTemplateColumns: "repeat(auto-fill, minmax(380px, 1fr))",
+    gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))",
     gap: 16,
   },
   card: {
@@ -978,6 +979,7 @@ const S = {
     display: "flex",
     flexDirection: "column",
     gap: 10,
+    minWidth: 0,
   },
   cardTop: {
     display: "flex",
@@ -1045,6 +1047,19 @@ const S = {
     fontWeight: 600,
     cursor: "pointer",
   },
+  vbracketBtn: {
+    background: "rgba(200,255,0,0.08)",
+    color: "#c8ff00",
+    border: "1px solid rgba(200,255,0,0.25)",
+    borderRadius: 6,
+    fontSize: 12,
+    fontWeight: 600,
+    cursor: "pointer",
+    textAlign: "center", // ← center the text
+    width: "100%", // ← stretch to fill the column width
+    padding: 0, // ← remove padding so flex controls height
+    lineHeight: 1.1, // ← adjust line height for better vertical centering
+  },
   // Manage Teams button (NEW — orange accent to differentiate)
   teamsBtn: {
     background: "rgba(255,160,80,0.1)",
@@ -1062,6 +1077,8 @@ const S = {
     gap: 6,
     padding: "14px 12px",
     justifyContent: "center",
+    flexShrink: 0,
+    width: 80,
   },
   editBtn: {
     background: "rgba(255,255,255,0.06)",

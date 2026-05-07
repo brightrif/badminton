@@ -193,7 +193,7 @@ export default function UmpireDashboard() {
     setFetching(true);
     setError("");
     try {
-      const res = await authFetch(`/api/matches/my_matches/`);
+      const res = await authFetch(`${API_BASE}/matches/my_matches/`);
       if (res.status === 401) {
         // Token expired and refresh failed — send back to login
         navigate("/umpire/login");
@@ -346,7 +346,7 @@ export default function UmpireDashboard() {
 const S = {
   page: {
     minHeight: "100vh",
-    background: "#0a0e1a",
+    background: "#0a0a0a",
     color: "#f1f5f9",
     fontFamily: "'DM Sans', system-ui, sans-serif",
     padding: "0 0 48px",
@@ -404,21 +404,21 @@ const S = {
     fontSize: "12px",
     fontWeight: "600",
     letterSpacing: "0.12em",
-    color: "#475569",
+    color: "rgba(255,255,255,0.35)",
     textTransform: "uppercase",
     marginBottom: "12px",
   },
   empty: {
     fontSize: "13px",
-    color: "#334155",
+    color: "rgba(255,255,255,0.3)",
     padding: "16px 0",
   },
   card: {
-    background: "#1e293b",
+    background: "#111",
     borderRadius: "12px",
     padding: "16px 20px",
     marginBottom: "12px",
-    border: "1px solid #273449",
+    border: "1px solid rgba(255,255,255,0.07)",
   },
   pill: {
     display: "inline-flex",
@@ -432,9 +432,9 @@ const S = {
     marginBottom: "10px",
     textTransform: "uppercase",
   },
-  pillLive: { background: "#450a0a", color: "#fca5a5" },
-  pillUpcoming: { background: "#0c1a33", color: "#93c5fd" },
-  pillDone: { background: "#0f2016", color: "#86efac" },
+  pillLive: { background: "rgba(255,60,60,0.1)", color: "#f87171" },
+  pillUpcoming: { background: "rgba(74,170,255,0.1)", color: "#4af" },
+  pillDone: { background: "rgba(110,231,183,0.1)", color: "#6ee7b7" },
   liveDot: {
     width: "6px",
     height: "6px",
@@ -452,11 +452,11 @@ const S = {
   team: {
     fontSize: "16px",
     fontWeight: "600",
-    color: "#f1f5f9",
+    color: "#fff",
   },
   vs: {
     fontSize: "12px",
-    color: "#475569",
+    color: "rgba(255,255,255,0.25)",
   },
   meta: {
     display: "flex",
@@ -466,7 +466,7 @@ const S = {
   },
   metaItem: {
     fontSize: "12px",
-    color: "#64748b",
+    color: "rgba(255,255,255,0.4)",
   },
   scoreSummary: {
     fontSize: "20px",
@@ -484,8 +484,8 @@ const S = {
     letterSpacing: "0.08em",
     transition: "opacity 0.15s",
   },
-  enterBtnLive: { background: "#dc2626", color: "#fff" },
-  enterBtnUpcoming: { background: "#1d4ed8", color: "#fff" },
+  enterBtnLive: { background: "rgba(255,60,60,0.15)", color: "#f87171" },
+  enterBtnUpcoming: { background: "rgba(200,255,0,0.12)", color: "#c8ff00" },
   loading: {
     display: "flex",
     alignItems: "center",
@@ -507,7 +507,7 @@ const S = {
     marginTop: "32px",
   },
   pinLink: {
-    color: "#e8ff47",
+    color: "#c8ff00",
     cursor: "pointer",
     textDecoration: "underline",
   },

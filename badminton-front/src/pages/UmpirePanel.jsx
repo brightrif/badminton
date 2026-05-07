@@ -387,7 +387,7 @@ function statusColor(s) {
 const S = {
   page: {
     minHeight: "100dvh",
-    background: "#0c0f0c",
+    background: "#0a0a0a",
     color: "#fff",
     fontFamily: "'DM Sans', sans-serif",
     display: "flex",
@@ -414,7 +414,7 @@ const S = {
     width: "32px",
     height: "32px",
     border: "3px solid rgba(255,255,255,0.1)",
-    borderTop: "3px solid #e8ff47",
+    borderTop: "3px solid #c8ff00",
     borderRadius: "50%",
     animation: "spin 0.8s linear infinite",
   },
@@ -701,7 +701,7 @@ const S = {
   },
   servingBtnActive: {
     background: "rgba(232,255,71,0.12)",
-    border: "1px solid #e8ff47",
+    border: "1px solid #c8ff00",
     color: "#e8ff47",
   },
   undoRow: {
@@ -727,8 +727,8 @@ const S = {
   startBtn: {
     width: "100%",
     padding: "18px",
-    background: "#22c55e",
-    color: "#fff",
+    background: "rgba(200,255,0,0.9)",
+    color: "#0a0a0a",
     border: "none",
     borderRadius: "12px",
     fontFamily: "'Bebas Neue', sans-serif",
@@ -761,7 +761,7 @@ const S = {
 const CSS = `
   @import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@400;500;600;700&display=swap');
   * { box-sizing: border-box; }
-  body { margin: 0; background: #0c0f0c; }
+  body { margin: 0; background: #0a0a0a; }
   @keyframes spin { to { transform: rotate(360deg); } }
   button:active:not(:disabled) { transform: scale(0.96); }
 `;

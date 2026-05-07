@@ -394,11 +394,6 @@ function MatchRow({ m, onEdit, onDelete, onAssignUmpire, editLoadingId }) {
       <div style={S.rowMeta}>{m.match_type?.replace(/_/g, " ")}</div>
       <div style={S.rowMeta}>{m.court_name || m.venue_name || "—"}</div>
       <div style={S.rowMeta}>{time}</div>
-      {m.umpire_pin && (
-        <div style={S.pin}>
-          PIN <strong>{m.umpire_pin}</strong>
-        </div>
-      )}
       <div style={S.rowActions}>
         {/* ── Umpire assign button — NEW ─────────────────────────────────── */}
         <button
@@ -580,6 +575,11 @@ function MatchForm({ initial, onSave, onClose }) {
 
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
 
+  const handleVenueChange = (e) => {
+    const venueId = e.target.value;
+    setForm((f) => ({ ...f, venue: venueId, court: "" }));
+  };
+
   const handleEventChange = (e) => {
     const eventId = e.target.value;
     const evArr = Array.isArray(allEvents) ? allEvents : [];
@@ -601,7 +601,6 @@ function MatchForm({ initial, onSave, onClose }) {
 
   const handleTournamentChange = (e) => {
     const tournId = e.target.value;
-    const evArr = Array.isArray(allEvents) ? allEvents : [];
     const currentEvent = evArr.find((ev) => String(ev.id) === form.event);
     setForm((f) => ({
       ...f,
@@ -621,6 +620,11 @@ function MatchForm({ initial, onSave, onClose }) {
   const venueOpts = Array.isArray(venues) ? venues : [];
   const courtOpts = Array.isArray(courts) ? courts : [];
   const evArr = Array.isArray(allEvents) ? allEvents : [];
+
+  // Filtered to only show events for the selected tournament
+  const filteredEvents = form.tournament
+    ? evArr.filter((ev) => String(ev.tournament) === String(form.tournament))
+    : evArr;
 
   const playerOpts =
     eventPlayers !== null
@@ -683,6 +687,22 @@ function MatchForm({ initial, onSave, onClose }) {
     >
       {error && <div style={S.errBox}>{error}</div>}
 
+      {/* ── Tournament ── */}
+      <FormField label="Tournament">
+        <Select
+          value={form.tournament}
+          onChange={handleTournamentChange}
+          required
+        >
+          <option value="">— Select —</option>
+          {tournOpts.map((t) => (
+            <option key={t.id} value={t.id}>
+              {t.name}
+            </option>
+          ))}
+        </Select>
+      </FormField>
+
       {/* ── Event picker ── */}
       <div style={S.eventPickerBox}>
         <div style={S.eventPickerLabel}>Event category</div>
@@ -692,7 +712,7 @@ function MatchForm({ initial, onSave, onClose }) {
         </div>
         <Select value={form.event} onChange={handleEventChange}>
           <option value="">— No event selected —</option>
-          {evArr.map((ev) => (
+          {filteredEvents.map((ev) => (
             <option key={ev.id} value={ev.id}>
               {ev.name}
             </option>
@@ -752,22 +772,6 @@ function MatchForm({ initial, onSave, onClose }) {
       )}
 
       <div style={S.divider} />
-
-      {/* ── Tournament ── */}
-      <FormField label="Tournament">
-        <Select
-          value={form.tournament}
-          onChange={handleTournamentChange}
-          required
-        >
-          <option value="">— Select —</option>
-          {tournOpts.map((t) => (
-            <option key={t.id} value={t.id}>
-              {t.name}
-            </option>
-          ))}
-        </Select>
-      </FormField>
 
       {/* ── Match type + Scoring format ── */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
@@ -955,7 +959,7 @@ function MatchForm({ initial, onSave, onClose }) {
       {/* ── Venue + Court ── */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
         <FormField label="Venue">
-          <Select value={form.venue} onChange={set("venue")}>
+          <Select value={form.venue} onChange={handleVenueChange}>
             <option value="">— Select —</option>
             {venueOpts.map((v) => (
               <option key={v.id} value={v.id}>
@@ -965,12 +969,16 @@ function MatchForm({ initial, onSave, onClose }) {
           </Select>
         </FormField>
         <FormField label="Court">
-          <Select value={form.court} onChange={set("court")}>
-            <option value="">— Select —</option>
+          <Select
+            value={form.court}
+            onChange={set("court")}
+            disabled={!form.venue}
+          >
+            <option value="">
+              {form.venue ? "— Select court —" : "— Select venue first —"}
+            </option>
             {courtOpts
-              .filter(
-                (c) => !form.venue || String(c.venue) === String(form.venue),
-              )
+              .filter((c) => String(c.venue) === String(form.venue))
               .map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.name}
@@ -1264,7 +1272,7 @@ const S = {
   },
   headerRow: {
     display: "grid",
-    gridTemplateColumns: "16px 2fr 1fr 1fr 1fr 1fr 1fr 80px",
+    gridTemplateColumns: "16px 2fr 1fr 1fr 1fr 1fr 1fr 120px",
     gap: 12,
     padding: "0 14px",
     alignItems: "center",
@@ -1292,7 +1300,7 @@ const S = {
   },
   row: {
     display: "grid",
-    gridTemplateColumns: "16px 2fr 1fr 1fr 1fr 1fr 1fr 80px",
+    gridTemplateColumns: "16px 2fr 1fr 1fr 1fr 1fr 1fr 120px",
     gap: 12,
     padding: "12px 14px",
     background: "#111",
