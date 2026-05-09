@@ -25,14 +25,21 @@ class CountrySerializer(serializers.ModelSerializer):
 
 class CourtSerializer(serializers.ModelSerializer):
     venue_name = serializers.CharField(source='venue.name', read_only=True)
+    screen_url = serializers.SerializerMethodField()
 
     class Meta:
         model = Court
         fields = [
-            'id', 'name', 'court_type', 'surface_type', 
+            'id', 'name','slug','screen_url','court_type', 'surface_type', 
             'is_active', 'venue', 'venue_name', 'created_at'
         ]
         read_only_fields = ['created_at']
+
+    def get_screen_url(self, obj):
+        request = self.context.get('request')
+        if request:
+            return request.build_absolute_uri(f'/screen/court/{obj.slug}/')
+        return ''
 
 class VenueSerializer(serializers.ModelSerializer):
     country_name = serializers.CharField(source='country.name', read_only=True)

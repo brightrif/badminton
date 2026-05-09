@@ -633,6 +633,21 @@ function MatchForm({ initial, onSave, onClose }) {
         ? allPlayers
         : [];
 
+  // Per-slot player options — each slot excludes players chosen in other slots
+  const selectedPlayerIds = {
+    player1_team1: String(form.player1_team1 || ""),
+    player2_team1: String(form.player2_team1 || ""),
+    player1_team2: String(form.player1_team2 || ""),
+    player2_team2: String(form.player2_team2 || ""),
+  };
+  const optsFor = (slotKey) =>
+    playerOpts.filter((p) => {
+      const id = String(p.id);
+      return Object.entries(selectedPlayerIds).every(
+        ([key, val]) => key === slotKey || val === "" || val !== id,
+      );
+    });
+
   const activePlayers = [
     form.player1_team1,
     form.player2_team1,
@@ -877,7 +892,7 @@ function MatchForm({ initial, onSave, onClose }) {
                 required
               >
                 <option value="">— Select —</option>
-                {playerOpts.map((p) => (
+                {optsFor("player1_team1").map((p) => (
                   <option key={p.id} value={p.id}>
                     {p.name}
                     {p.country ? ` (${p.country})` : ""}
@@ -892,7 +907,7 @@ function MatchForm({ initial, onSave, onClose }) {
                   onChange={set("player2_team1")}
                 >
                   <option value="">— Select —</option>
-                  {playerOpts.map((p) => (
+                  {optsFor("player2_team1").map((p) => (
                     <option key={p.id} value={p.id}>
                       {p.name}
                       {p.country ? ` (${p.country})` : ""}
@@ -914,7 +929,7 @@ function MatchForm({ initial, onSave, onClose }) {
                 required
               >
                 <option value="">— Select —</option>
-                {playerOpts.map((p) => (
+                {optsFor("player1_team2").map((p) => (
                   <option key={p.id} value={p.id}>
                     {p.name}
                     {p.country ? ` (${p.country})` : ""}
@@ -929,7 +944,7 @@ function MatchForm({ initial, onSave, onClose }) {
                   onChange={set("player2_team2")}
                 >
                   <option value="">— Select —</option>
-                  {playerOpts.map((p) => (
+                  {optsFor("player2_team2").map((p) => (
                     <option key={p.id} value={p.id}>
                       {p.name}
                       {p.country ? ` (${p.country})` : ""}

@@ -110,7 +110,7 @@ class CourtViewSet(viewsets.ModelViewSet):
     permission_classes = [AllowAny]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['venue', 'court_type', 'surface_type', 'is_active']
-    search_fields = ['name']
+    search_fields = ['name', 'slug']
     ordering_fields = ['name', 'court_type', 'created_at']
     ordering = ['venue', 'name']
 
@@ -119,9 +119,32 @@ class CourtViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['get'])
     def matches(self, request, pk=None):
-        court = self.get_object()
-        serializer = MatchListSerializer(court.matches.all(), many=True)
+        court  = self.get_object()
+        qs     = court.matches.all()
+        status = request.query_params.get('status')
+        if status:
+            qs = qs.filter(status=status)
+        # Return the most recently scheduled match first
+        qs = qs.order_by('-scheduled_time')
+        serializer = MatchListSerializer(qs, many=True)
         return Response(serializer.data)
+    
+    @action(detail=False, methods=['get'])
+    def by_slug(self, request):
+        slug = request.query_params.get('slug', '').strip()
+        if not slug:
+            return Response(
+                {'error': 'slug parameter is required'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            court = Court.objects.select_related('venue').get(slug=slug)
+        except Court.DoesNotExist:
+            return Response(
+                {'error': f'No court found with slug "{slug}"'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        return Response(CourtSerializer(court).data)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

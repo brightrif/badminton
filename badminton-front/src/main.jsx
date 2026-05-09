@@ -1,4 +1,4 @@
-// src/main.jsx  — full file with Events + EventBracket routes added
+// src/main.jsx
 
 import React from "react";
 import ReactDOM from "react-dom/client";
@@ -8,6 +8,7 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import App from "./App";
 import UmpirePinEntry from "./pages/UmpirePinEntry";
 import UmpirePanel from "./pages/UmpirePanel";
+import CourtScreen from "./pages/CourtScreen"; // ← NEW
 
 // ── Director portal ────────────────────────────────────────────────────────────
 import { AuthProvider } from "./context/AuthContext";
@@ -20,7 +21,7 @@ import DirectorPlayers from "./pages/director/Players";
 import DirectorSponsors from "./pages/director/Sponsors";
 import DirectorVenues from "./pages/director/Venues";
 
-// ── NEW: bracket system ────────────────────────────────────────────────────────
+// ── Bracket system ─────────────────────────────────────────────────────────────
 import DirectorEvents from "./pages/director/Events";
 import EventBracket from "./pages/director/EventBracket";
 
@@ -33,12 +34,16 @@ ReactDOM.createRoot(document.getElementById("root")).render(
     <AuthProvider>
       <BrowserRouter>
         <Routes>
-          {/* Public */}
+          {/* ── Public screens ──────────────────────────────────────────── */}
           <Route path="/" element={<App />} />
           <Route path="/umpire" element={<UmpirePinEntry />} />
           <Route path="/umpire/:matchId/score" element={<UmpirePanel />} />
 
-          {/* Director portal */}
+          {/* Court-based scoreboard — one permanent URL per court         */}
+          {/* e.g.  /screen/court/khalifa-sc-court-1                      */}
+          <Route path="/screen/court/:slug" element={<CourtScreen />} />
+
+          {/* ── Director portal ─────────────────────────────────────────── */}
           <Route path="/director/login" element={<DirectorLogin />} />
           <Route path="/director" element={<DirectorLayout />}>
             <Route index element={<DirectorDashboard />} />
@@ -48,11 +53,11 @@ ReactDOM.createRoot(document.getElementById("root")).render(
             <Route path="players" element={<DirectorPlayers />} />
             <Route path="sponsors" element={<DirectorSponsors />} />
             <Route path="venues" element={<DirectorVenues />} />
-            {/* NEW */}
             <Route path="events" element={<DirectorEvents />} />
             <Route path="events/:id/bracket" element={<EventBracket />} />
           </Route>
-          {/* umpire  */}
+
+          {/* ── Umpire ──────────────────────────────────────────────────── */}
           <Route path="/umpire/login" element={<UmpireLogin />} />
           <Route
             path="/umpire/dashboard"

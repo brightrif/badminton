@@ -3,6 +3,8 @@ from django.db import models
 from django.core.exceptions import ValidationError
 import random
 from .event_registration import EventRegistration
+from .event_models import TournamentEvent
+from django.utils.text import slugify
 
 class Country(models.Model):
     name = models.CharField(max_length=100, unique=True)
@@ -89,10 +91,29 @@ class Court(models.Model):
 
     venue = models.ForeignKey(Venue, on_delete=models.CASCADE, related_name='courts')
     name = models.CharField(max_length=100)
+    slug         = models.SlugField(
+                       max_length=120,
+                       unique=True,
+                       blank=True,
+                       help_text="URL-friendly identifier used for screen URLs (/screen/court/<slug>). "
+                                 "Auto-generated from venue + court name if left blank.",
+                   )
     court_type = models.CharField(max_length=20, choices=COURT_TYPE_CHOICES, default='INDOOR')
     surface_type = models.CharField(max_length=20, choices=SURFACE_TYPE_CHOICES, default='WOOD')
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
+
+    def save(self, *args, **kwargs):
+        if not self.slug:
+            base = slugify(f"{self.venue.name}-{self.name}")
+            slug = base
+            n = 1
+            # Keep trying until unique
+            while Court.objects.filter(slug=slug).exclude(pk=self.pk).exists():
+                n += 1
+                slug = f"{base}-{n}"
+            self.slug = slug
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return f"{self.venue.name} - {self.name}"
@@ -182,6 +203,13 @@ class Match(models.Model):
     ]
 
     tournament = models.ForeignKey(Tournament, on_delete=models.CASCADE, related_name='matches')
+    event = models.ForeignKey(
+        'match.TournamentEvent',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='event_matches',
+    )
     match_type = models.CharField(max_length=20, choices=MATCH_TYPE_CHOICES)
 
     # Team 1

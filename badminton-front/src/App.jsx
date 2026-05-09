@@ -14,7 +14,8 @@
 import { useState, useEffect, useRef } from "react";
 import { Dot } from "lucide-react";
 import PlayerCard from "./components/PlayerCard";
-import SponsorDisplay from "./components/SponsorDisplay";
+// import SponsorDisplay from "./components/SponsorDisplay";
+import SponsorDisplay, { getTier } from "./components/SponsorDisplay";
 import { useMatchSocket } from "./hooks/useMatchSocket";
 
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000/api";

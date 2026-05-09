@@ -5,7 +5,7 @@
 # No bracket engine, no calculations. Director feeds everything manually.
 
 from django.db import models
-from .models import Tournament
+# from .models import Tournament
 
 
 class TournamentEvent(models.Model):
@@ -23,7 +23,7 @@ class TournamentEvent(models.Model):
     ]
 
     tournament  = models.ForeignKey(
-        Tournament, on_delete=models.CASCADE, related_name="events"
+        'match.Tournament', on_delete=models.CASCADE, related_name="events"
     )
     # e.g. "MD Level 1", "WD Level 2 (F3 & F4)", "XD Championship"
     name        = models.CharField(max_length=120)
