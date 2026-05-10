@@ -2,7 +2,7 @@
 
 import React from "react";
 import ReactDOM from "react-dom/client";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 
 // ── Public screens ─────────────────────────────────────────────────────────────
 import App from "./App";
@@ -36,7 +36,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
         <Routes>
           {/* ── Public screens ──────────────────────────────────────────── */}
           <Route path="/" element={<App />} />
-          <Route path="/umpire" element={<UmpirePinEntry />} />
+          <Route path="/umpire/score-entry" element={<UmpirePinEntry />} />
           <Route path="/umpire/:matchId/score" element={<UmpirePanel />} />
 
           {/* Court-based scoreboard — one permanent URL per court         */}
@@ -58,6 +58,11 @@ ReactDOM.createRoot(document.getElementById("root")).render(
           </Route>
 
           {/* ── Umpire ──────────────────────────────────────────────────── */}
+          {/* /umpire → redirect to login */}
+          <Route
+            path="/umpire"
+            element={<Navigate to="/umpire/login" replace />}
+          />
           <Route path="/umpire/login" element={<UmpireLogin />} />
           <Route
             path="/umpire/dashboard"

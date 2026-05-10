@@ -68,6 +68,9 @@ export function useMatchSocket(matchId, token = null) {
     function connect() {
       if (cancelled.current) return;
 
+      // ✅ Reset state on every fresh connection so stale matchWon/winner never bleeds in
+      setState(initialState);
+
       if (wsRef.current) {
         wsRef.current.onclose = null;
         wsRef.current.close();

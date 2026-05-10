@@ -6,55 +6,28 @@
 //   1. Resolves court from slug  → GET /api/courts/by_slug/?slug=<slug>
 //   2. Polls /api/courts/<id>/matches/?status=Live  every 30 s
 //   3. Connects WebSocket for live score updates via useMatchSocket
-//   4. Auto-switches when match changes / ends (re-polls after 5 s)
+//   4. Auto-switches when match changes / ends (re-polls after 60 s)
 //   5. Shows idle screen when no live match is on this court
 //
-// ─────────────────────────────────────────────────────────────────────────────
-// HOW TO APPLY THIS TO App.jsx
-//   This file IS the new App.jsx logic + all sponsor/layout improvements.
-//   To migrate App.jsx, do the following:
-//
-//   1. Replace the SponsorDisplay import line:
-//        BEFORE: import SponsorDisplay from "./components/SponsorDisplay";
-//        AFTER:  import SponsorDisplay, { getTier } from "./components/SponsorDisplay";
-//
-//   2. Remove the useParams import (not needed in App.jsx)
-//      and remove the court-resolution logic (steps 1 & 2 below the comment
-//      "── 1. Resolve court by slug" and "── 2. Poll for live match").
-//      App.jsx keeps its own bootstrap fetch instead.
-//
-//   3. Copy the sponsor tier bucket variables (search "SPONSOR TIER BUCKETS")
-//      into App.jsx right after the existing sponsors state.
-//
-//   4. Replace the carousel useEffect in App.jsx with the one marked
-//      "CAROUSEL USEEFFECT".
-//
-//   5. Replace the entire <header> JSX block with the one marked
-//      "TOP BAR JSX — 3-column grid".
-//
-//   6. Replace the entire <footer> JSX block with the one marked
-//      "SPONSOR FOOTER JSX".
-//
-//   7. Replace the match-won overlay JSX with the one marked
-//      "MATCH WON OVERLAY JSX" (adds "PRESENTED BY" title sponsor).
-//
-//   8. Replace S.main padding, S.topBar, S.tournamentBlock, S.statusBlock,
-//      and all sponsor styles with the ones at the bottom of this file
-//      (marked "── Styles").
+// SPONSOR FETCH PRIORITY (tournament-filtered):
+//   1. Live match tournament      → most relevant
+//   2. Upcoming match tournament  → next best
+//   3. Most recent completed match tournament → fallback when nothing scheduled
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { useParams } from "react-router-dom"; // REMOVE THIS LINE in App.jsx
+import { useParams } from "react-router-dom";
 import { Dot } from "lucide-react";
-import PlayerCard from "../components/PlayerCard"; // App.jsx: "./components/PlayerCard"
-import SponsorDisplay, { getTier } from "../components/SponsorDisplay"; // App.jsx: "./components/SponsorDisplay"
-import { useMatchSocket } from "../hooks/useMatchSocket"; // App.jsx: "./hooks/useMatchSocket"
+import PlayerCard from "../components/PlayerCard";
+import SponsorDisplay from "../components/SponsorDisplay";
+import { useMatchSocket } from "../hooks/useMatchSocket";
+import { getTier } from "../utils/sponsorTiers";
 
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000/api";
 const POLL_INTERVAL = 30_000; // 30 seconds between live-match polls
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SUB-COMPONENTS (copy all of these into App.jsx as-is)
+// SUB-COMPONENTS
 // ─────────────────────────────────────────────────────────────────────────────
 
 // ── SetDots ───────────────────────────────────────────────────────────────────
@@ -158,8 +131,23 @@ function FullScreenMessage({ text, sub, pulse }) {
   );
 }
 
-// ── IdleScreen (CourtScreen only — not needed in App.jsx) ────────────────────
-function IdleScreen({ courtName, venueName, nextMatch }) {
+// ── IdleScreen ────────────────────────────────────────────────────────────────
+function IdleScreen({ courtName, venueName, nextMatch, sponsors = [] }) {
+  const [sponsorIndex, setSponsorIndex] = useState(0);
+
+  const titleSponsors = sponsors.filter((s) => getTier(s.priority) === "title");
+  const carouselSponsors = sponsors.filter(
+    (s) => getTier(s.priority) !== "title",
+  );
+
+  useEffect(() => {
+    if (carouselSponsors.length <= 1) return;
+    const t = setInterval(() => {
+      setSponsorIndex((i) => (i + 1) % carouselSponsors.length);
+    }, 3000);
+    return () => clearInterval(t);
+  }, [carouselSponsors.length]);
+
   return (
     <div style={S.page}>
       <style>{CSS}</style>
@@ -168,11 +156,14 @@ function IdleScreen({ courtName, venueName, nextMatch }) {
         <div style={S.courtLine2} />
         <div style={S.courtCenter} />
       </div>
+
       {/* Court identity badge */}
       <div style={S.courtBadge}>
         <span style={S.courtBadgeVenue}>{venueName}</span>
         <span style={S.courtBadgeName}>{courtName}</span>
       </div>
+
+      {/* Centre content */}
       <div
         style={{
           flex: 1,
@@ -201,9 +192,10 @@ function IdleScreen({ courtName, venueName, nextMatch }) {
             letterSpacing: 6,
           }}
         >
-          Waiting for match
+          WAITING FOR MATCH
         </div>
-        {/* Up-next card shown when an upcoming match exists on this court */}
+
+        {/* Up-next card */}
         {nextMatch && (
           <div
             style={{
@@ -245,7 +237,50 @@ function IdleScreen({ courtName, venueName, nextMatch }) {
           </div>
         )}
       </div>
-      {/* Tiny green pulse dot — reassures staff the screen is alive */}
+
+      {/* ── Sponsor footer ── */}
+      {sponsors.length > 0 && (
+        <footer style={S.sponsorBar}>
+          {/* Title sponsor — always visible */}
+          {titleSponsors.length > 0 && (
+            <div style={S.titleSlot}>
+              <SponsorDisplay sponsor={titleSponsors[0]} tier="title" />
+            </div>
+          )}
+
+          {titleSponsors.length > 0 && carouselSponsors.length > 0 && (
+            <div style={S.sponsorDivider} />
+          )}
+
+          {carouselSponsors.length > 0 && (
+            <span style={S.sponsorLabel}>
+              {titleSponsors.length > 0 ? "ALSO SUPPORTED BY" : "SUPPORTED BY"}
+            </span>
+          )}
+
+          {carouselSponsors.length > 0 && (
+            <div style={S.sponsorRow}>
+              {carouselSponsors.map((sp, i) => (
+                <div
+                  key={sp.id ?? sp.name}
+                  style={{
+                    ...S.sponsorCell,
+                    opacity:
+                      carouselSponsors.length <= 4 || i === sponsorIndex
+                        ? 1
+                        : 0,
+                    transition: "opacity 0.8s ease",
+                  }}
+                >
+                  <SponsorDisplay sponsor={sp} />
+                </div>
+              ))}
+            </div>
+          )}
+        </footer>
+      )}
+
+      {/* Live pulse dot */}
       <div
         style={{
           position: "fixed",
@@ -265,23 +300,19 @@ function IdleScreen({ courtName, venueName, nextMatch }) {
 // MAIN COMPONENT
 // ─────────────────────────────────────────────────────────────────────────────
 export default function CourtScreen() {
-  // ── Court slug from URL (CourtScreen only — remove in App.jsx) ────────────
   const { slug } = useParams();
 
   // ── State ─────────────────────────────────────────────────────────────────
-  // Court resolution (CourtScreen only)
   const [court, setCourt] = useState(null);
   const [courtError, setCourtError] = useState(null);
   const [courtLoading, setCourtLoading] = useState(true);
 
-  // Match data
   const [matchId, setMatchId] = useState(null);
-  const [matchMeta, setMatchMeta] = useState(null); // static detail from REST
-  const [nextMatch, setNextMatch] = useState(null); // upcoming match for idle screen
+  const [matchMeta, setMatchMeta] = useState(null);
+  const [nextMatch, setNextMatch] = useState(null);
   const [sponsors, setSponsors] = useState([]);
 
-  // Scoreboard UI
-  const [flashTeam, setFlashTeam] = useState(null); // 1 | 2
+  const [flashTeam, setFlashTeam] = useState(null);
   const [gameWonOverlay, setGameWonOverlay] = useState(null);
   const [matchWonOverlay, setMatchWonOverlay] = useState(null);
   const [sponsorIndex, setSponsorIndex] = useState(0);
@@ -289,19 +320,30 @@ export default function CourtScreen() {
   const prevScores = useRef({ t1: null, t2: null });
   const prevMatchWon = useRef(false);
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // SPONSOR TIER BUCKETS
-  // Copy these 4 lines into App.jsx right after "const [sponsorIndex, ...]"
-  // ─────────────────────────────────────────────────────────────────────────
+  // ── Sponsor tier buckets ──────────────────────────────────────────────────
   const titleSponsors = sponsors.filter((s) => getTier(s.priority) === "title");
   const goldSponsors = sponsors.filter((s) => getTier(s.priority) === "gold");
   const standardSponsors = sponsors.filter(
     (s) => getTier(s.priority) === "standard",
   );
-  // Gold + standard share the right-side carousel slot
   const carouselSponsors = [...goldSponsors, ...standardSponsors];
 
-  // ── 1. Resolve court by slug (CourtScreen only — remove block in App.jsx) ─
+  // ── Helper: fetch sponsors filtered by tournament ID ──────────────────────
+  // This is the single source of truth for sponsor fetching.
+  // Always filtered by tournament so we never mix sponsors across tournaments.
+  const fetchSponsorsForTournament = useCallback((tournamentId) => {
+    if (!tournamentId) return;
+    fetch(`${API_BASE}/sponsors/?tournament=${tournamentId}&ordering=-priority`)
+      .then((r) => r.json())
+      .then((d) => {
+        const arr = Array.isArray(d) ? d : (d.results ?? []);
+        if (arr.length > 0) setSponsors(arr);
+        // If empty (tournament has no sponsors), keep existing sponsors visible
+      })
+      .catch((e) => console.error("[CourtScreen] sponsors fetch error:", e));
+  }, []);
+
+  // ── 1. Resolve court by slug ──────────────────────────────────────────────
   useEffect(() => {
     if (!slug) return;
     setCourtLoading(true);
@@ -320,11 +362,17 @@ export default function CourtScreen() {
       });
   }, [slug]);
 
-  // ── 2. Poll for live match on this court (CourtScreen only) ──────────────
+  // ── 2. Poll for live match + fetch tournament-filtered sponsors ───────────
+  //
+  // Sponsor fetch priority order:
+  //   1. Live match tournament      → always most relevant
+  //   2. Upcoming match tournament  → shown during idle/pre-match
+  //   3. Most recent completed match tournament → fallback when nothing scheduled
+  //
   const pollForMatch = useCallback(async () => {
     if (!court) return;
     try {
-      // Try live first
+      // ── Try live first ────────────────────────────────────────────────────
       const liveRes = await fetch(
         `${API_BASE}/courts/${court.id}/matches/?status=Live`,
       );
@@ -334,15 +382,18 @@ export default function CourtScreen() {
 
       if (liveArr.length > 0) {
         const m = liveArr[0];
-        setMatchId((prev) => (prev === m.id ? prev : m.id)); // avoid unnecessary re-renders
+        setMatchId((prev) => (prev === m.id ? prev : m.id));
         setNextMatch(null);
+        // ✅ Priority 1 — fetch sponsors for live match's tournament
+        fetchSponsorsForTournament(m.tournament);
         return;
       }
 
-      // No live match — clear and look for upcoming to show in idle screen
+      // ── No live match — clear match state ─────────────────────────────────
       setMatchId(null);
       setMatchMeta(null);
 
+      // ── Try upcoming ──────────────────────────────────────────────────────
       const upRes = await fetch(
         `${API_BASE}/courts/${court.id}/matches/?status=Upcoming`,
       );
@@ -363,13 +414,30 @@ export default function CourtScreen() {
           team2: t2,
           scheduled_time: u.scheduled_time,
         });
-      } else {
-        setNextMatch(null);
+        // ✅ Priority 2 — fetch sponsors for upcoming match's tournament
+        fetchSponsorsForTournament(u.tournament);
+        return;
       }
+
+      // ── No live or upcoming — look for most recent completed match ─────────
+      setNextMatch(null);
+      const recentRes = await fetch(
+        `${API_BASE}/courts/${court.id}/matches/?status=Completed&ordering=-scheduled_time&limit=1`,
+      );
+      const recent = await recentRes
+        .json()
+        .then((d) => (Array.isArray(d) ? d : (d.results ?? [])));
+
+      if (recent.length > 0) {
+        // ✅ Priority 3 — fallback: sponsors from most recent completed match
+        fetchSponsorsForTournament(recent[0].tournament);
+      }
+      // If no matches at all on this court, sponsors stay as-is (empty or
+      // whatever was previously loaded — nothing to show is fine)
     } catch (e) {
       console.error("[CourtScreen] poll error:", e);
     }
-  }, [court]);
+  }, [court, fetchSponsorsForTournament]);
 
   useEffect(() => {
     if (!court) return;
@@ -379,8 +447,6 @@ export default function CourtScreen() {
   }, [court, pollForMatch]);
 
   // ── 3. Fetch match metadata when matchId changes ──────────────────────────
-  // In App.jsx this is already done in the bootstrap() function.
-  // Only copy this block if App.jsx doesn't already fetch match detail + sponsors.
   useEffect(() => {
     if (!matchId) return;
     let cancelled = false;
@@ -392,11 +458,12 @@ export default function CourtScreen() {
         if (cancelled) return;
         setMatchMeta(detail);
 
-        const sData = await fetch(
-          `${API_BASE}/sponsors/?tournament=${detail.tournament}`,
-        ).then((r) => r.json());
-        if (cancelled) return;
-        setSponsors(Array.isArray(sData) ? sData : (sData.results ?? []));
+        // Sponsors are already fetched in pollForMatch via fetchSponsorsForTournament,
+        // but we re-fetch here too in case matchId changed via WebSocket push
+        // (not just polling), ensuring sponsors always match the current match.
+        if (detail.tournament) {
+          fetchSponsorsForTournament(detail.tournament);
+        }
       } catch (e) {
         console.error("[CourtScreen] meta error:", e);
       }
@@ -405,14 +472,17 @@ export default function CourtScreen() {
     return () => {
       cancelled = true;
     };
-  }, [matchId]);
+  }, [matchId, fetchSponsorsForTournament]);
 
   // ── 4. Live score via WebSocket ───────────────────────────────────────────
   const { state, isConnected } = useMatchSocket(matchId);
 
-  // Auto re-poll 5 s after match completes so the screen transitions to idle
+  // Re-poll 60 s after match completes — gives time for celebration overlay
+  // The 30 s interval above is still running, so a new match is never missed
+  // for more than 30 s regardless of this timeout value.
   useEffect(() => {
-    if (state.matchWon && !prevMatchWon.current) setTimeout(pollForMatch, 5000);
+    if (state.matchWon && !prevMatchWon.current)
+      setTimeout(pollForMatch, 60_000);
     prevMatchWon.current = state.matchWon;
   }, [state.matchWon, pollForMatch]);
 
@@ -434,33 +504,34 @@ export default function CourtScreen() {
   }, [state.team1Score, state.team2Score]);
 
   // ── 6. Game won / match won overlays ──────────────────────────────────────
+  const gameWonTimerRef = useRef(null);
+
   useEffect(() => {
     if (state.gameWon && !state.matchWon) {
+      clearTimeout(gameWonTimerRef.current);
       setGameWonOverlay({ game: state.currentGame - 1 });
-      const t = setTimeout(() => setGameWonOverlay(null), 3500);
-      return () => clearTimeout(t);
+      gameWonTimerRef.current = setTimeout(() => setGameWonOverlay(null), 3500);
+    } else {
+      clearTimeout(gameWonTimerRef.current);
+      setGameWonOverlay(null);
     }
-  }, [state.gameWon, state.currentGame]);
+    return () => clearTimeout(gameWonTimerRef.current);
+  }, [state.gameWon, state.matchWon]);
 
   useEffect(() => {
     if (state.matchWon) setMatchWonOverlay({ winner: state.winner });
   }, [state.matchWon, state.winner]);
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // CAROUSEL USEEFFECT
-  // Replace the existing sponsor carousel useEffect in App.jsx with this.
-  // Key change: cycles through carouselSponsors (gold + standard) in groups
-  // of 4, not one at a time. Title sponsor is always visible — never cycles.
-  // ─────────────────────────────────────────────────────────────────────────
+  // ── 7. Sponsor carousel ───────────────────────────────────────────────────
   useEffect(() => {
-    if (carouselSponsors.length <= 4) return; // all fit on screen — no cycling needed
+    if (carouselSponsors.length <= 4) return;
     const t = setInterval(() => {
       setSponsorIndex((i) => (i + 1) % carouselSponsors.length);
     }, 4000);
     return () => clearInterval(t);
   }, [carouselSponsors.length]);
 
-  // ── Guards (CourtScreen only) ─────────────────────────────────────────────
+  // ── Guards ────────────────────────────────────────────────────────────────
   if (courtLoading) return <FullScreenMessage text="LOADING…" pulse />;
   if (courtError)
     return <FullScreenMessage text="COURT NOT FOUND" sub={courtError} />;
@@ -470,6 +541,7 @@ export default function CourtScreen() {
         courtName={court.name}
         venueName={court.venue_name}
         nextMatch={nextMatch}
+        sponsors={sponsors}
       />
     );
   }
@@ -494,7 +566,7 @@ export default function CourtScreen() {
 
   const tournamentName = p.tournament_name ?? "";
   const matchType = p.match_type ?? "";
-  const eventName = p.event_name ?? ""; // shown as breadcrumb pill
+  const eventName = p.event_name ?? "";
 
   const isLive = state.status === "Live" || p.status === "Live";
   const isUpcoming = state.status === "Upcoming" || p.status === "Upcoming";
@@ -504,7 +576,7 @@ export default function CourtScreen() {
     (state.serverId === (p.player1_team1_detail?.id ?? p.player1_team1?.id) ||
       state.serverId === (p.player2_team1_detail?.id ?? p.player2_team1?.id));
 
-  // ── Visible carousel slice (up to 4 sponsors shown at once) ──────────────
+  // Visible carousel slice (up to 4 sponsors shown at once)
   const visibleCarouselIndices = [0, 1, 2, 3].map(
     (offset) => (sponsorIndex + offset) % (carouselSponsors.length || 1),
   );
@@ -516,7 +588,7 @@ export default function CourtScreen() {
     <div style={S.page}>
       <style>{CSS}</style>
 
-      {/* Court identity badge — top-left corner (CourtScreen only) */}
+      {/* Court identity badge */}
       <div style={S.courtBadge}>
         <span style={S.courtBadgeVenue}>{court.venue_name}</span>
         <span style={S.courtBadgeName}>{court.name}</span>
@@ -553,11 +625,7 @@ export default function CourtScreen() {
         </div>
       )}
 
-      {/* ─────────────────────────────────────────────────────────────────────
-          MATCH WON OVERLAY JSX
-          Replace the match-won overlay in App.jsx with this block.
-          Key addition: "PRESENTED BY" title sponsor logo below the trophy.
-          ───────────────────────────────────────────────────────────────── */}
+      {/* Match won overlay */}
       {matchWonOverlay && (
         <div
           style={{ ...S.overlay, background: "rgba(12,15,12,0.97)" }}
@@ -572,7 +640,7 @@ export default function CourtScreen() {
             </div>
             <div style={S.overlayTrophy}>🏆</div>
 
-            {/* Title sponsor "PRESENTED BY" moment — highest-value eyeball time */}
+            {/* Title sponsor "PRESENTED BY" moment */}
             {titleSponsors.length > 0 && (
               <div style={S.overlayPresentedBy}>
                 <div style={S.overlayPresentedByLabel}>PRESENTED BY</div>
@@ -583,21 +651,12 @@ export default function CourtScreen() {
         </div>
       )}
 
-      {/* ─────────────────────────────────────────────────────────────────────
-          TOP BAR JSX — 3-column grid
-          Replace the entire <header> in App.jsx with this block.
-          Changes vs old version:
-            • display:grid / gridTemplateColumns:"1fr auto 1fr"  (3 columns)
-            • Empty <div/> in col-1 keeps centre column truly centred
-            • Tournament name uses Bebas Neue + larger size
-            • Breadcrumb pill: eventName › matchType (matchType always shown)
-            • statusBlock uses justifyContent:"flex-end" to hug the right edge
-          ───────────────────────────────────────────────────────────────── */}
+      {/* Top bar — 3-column grid */}
       <header style={S.topBar}>
-        {/* Col 1 — intentionally empty (balances the status block on the right) */}
+        {/* Col 1 — empty (balances status block on the right) */}
         <div />
 
-        {/* Col 2 — tournament name + event/match-type pills — TRUE CENTRE */}
+        {/* Col 2 — tournament name + event/match-type pills */}
         <div style={S.tournamentBlock}>
           <span style={S.tournamentName}>{tournamentName}</span>
           <div
@@ -608,11 +667,8 @@ export default function CourtScreen() {
               justifyContent: "center",
             }}
           >
-            {/* Breadcrumb: show eventName › matchType when event exists,
-                otherwise just matchType pill alone */}
             {eventName ? (
               <>
-                {/* Yellow pill for event category */}
                 <span
                   style={{
                     ...S.matchTypePill,
@@ -623,7 +679,6 @@ export default function CourtScreen() {
                 >
                   {eventName}
                 </span>
-                {/* Arrow separator */}
                 <span
                   style={{
                     color: "rgba(255,255,255,0.2)",
@@ -633,17 +688,15 @@ export default function CourtScreen() {
                 >
                   ›
                 </span>
-                {/* Grey pill for match format */}
                 <span style={S.matchTypePill}>{matchType}</span>
               </>
             ) : (
-              /* No event assigned — just show match type */
               <span style={S.matchTypePill}>{matchType}</span>
             )}
           </div>
         </div>
 
-        {/* Col 3 — live badge + connection dot — pushed to right edge */}
+        {/* Col 3 — live badge + connection dot */}
         <div style={S.statusBlock}>
           {isLive && (
             <span style={S.liveBadge}>
@@ -658,7 +711,6 @@ export default function CourtScreen() {
           {state.status === "Completed" && (
             <span style={S.completedBadge}>COMPLETED</span>
           )}
-          {/* Green = WS connected, amber = reconnecting */}
           <span
             style={{
               ...S.connDot,
@@ -671,7 +723,7 @@ export default function CourtScreen() {
 
       {/* Main scoreboard — 3-column grid: team | score | team */}
       <main style={S.main}>
-        {/* Team 1 — left side */}
+        {/* Team 1 — left */}
         <div style={S.teamBlock}>
           <PlayerCard
             player={p.player1_team1_detail}
@@ -683,14 +735,12 @@ export default function CourtScreen() {
 
         {/* Centre score block */}
         <div style={S.centreBlock}>
-          {/* Set dots: ● ● SETS ● ● */}
           <div style={S.setDotsRow}>
             <SetDots count={state.team1Sets} />
             <span style={S.setLabel}>SETS</span>
             <SetDots count={state.team2Sets} />
           </div>
 
-          {/* Giant scores */}
           <div style={S.scoresRow}>
             <div
               style={{
@@ -728,7 +778,7 @@ export default function CourtScreen() {
             </div>
           </div>
 
-          {/* Completed game history pills — G1 21–18, G2 18–21, etc. */}
+          {/* Completed game history pills */}
           {state.gameScores.length > 0 && (
             <div style={S.gameHistoryRow}>
               {state.gameScores.map((gs) => (
@@ -740,13 +790,13 @@ export default function CourtScreen() {
             </div>
           )}
 
-          {/* Countdown shown when match is still upcoming */}
+          {/* Countdown when upcoming */}
           {isUpcoming && p?.scheduled_time && (
             <CountdownTimer scheduledTime={p.scheduled_time} />
           )}
         </div>
 
-        {/* Team 2 — right side (mirror: aligned to flex-end) */}
+        {/* Team 2 — right */}
         <div style={{ ...S.teamBlock, alignItems: "flex-end" }}>
           <PlayerCard
             player={p.player1_team2_detail}
@@ -759,13 +809,7 @@ export default function CourtScreen() {
         </div>
       </main>
 
-      {/* ─────────────────────────────────────────────────────────────────────
-          SPONSOR FOOTER JSX
-          Replace the entire <footer> in App.jsx with this block.
-          Layout:
-            [TITLE SPONSOR — always visible] | "ALSO SUPPORTED BY" (rotated)
-            | [gold/standard carousel — up to 4 at once] | [progress dots]
-          ───────────────────────────────────────────────────────────────── */}
+      {/* Sponsor footer */}
       {sponsors.length > 0 && (
         <footer style={S.sponsorBar}>
           {/* Title sponsor — always anchored left, never cycles */}
@@ -775,32 +819,27 @@ export default function CourtScreen() {
             </div>
           )}
 
-          {/* Vertical divider between title and the rest */}
           {titleSponsors.length > 0 && carouselSponsors.length > 0 && (
             <div style={S.sponsorDivider} />
           )}
 
-          {/* Rotated label — "ALSO SUPPORTED BY" or "SUPPORTED BY" */}
           {carouselSponsors.length > 0 && (
             <span style={S.sponsorLabel}>
               {titleSponsors.length > 0 ? "ALSO SUPPORTED BY" : "SUPPORTED BY"}
             </span>
           )}
 
-          {/* Gold + standard sponsors — show all if ≤4, else carousel */}
           {carouselSponsors.length > 0 && (
             <div style={S.sponsorRow}>
               {carouselSponsors.length <= 4
-                ? /* All fit on screen — show every one simultaneously */
-                  carouselSponsors.map((sp) => (
+                ? carouselSponsors.map((sp) => (
                     <div key={sp.id ?? sp.name} style={S.sponsorCell}>
                       <SponsorDisplay sponsor={sp} />
                     </div>
                   ))
-                : /* Too many to show at once — fade-cycle groups of 4 */
-                  carouselSponsors.map((sp, i) => {
+                : carouselSponsors.map((sp, i) => {
                     const isVisible = visibleCarouselIndices.includes(i);
-                    const slot = visibleCarouselIndices.indexOf(i); // 0-3
+                    const slot = visibleCarouselIndices.indexOf(i);
                     return (
                       <div
                         key={sp.id ?? sp.name}
@@ -823,7 +862,6 @@ export default function CourtScreen() {
             </div>
           )}
 
-          {/* Progress dots — only shown when there are more sponsors than fit */}
           {carouselSponsors.length > 4 && (
             <div style={S.progressDots}>
               {carouselSponsors.map((_, i) => (
@@ -849,19 +887,8 @@ export default function CourtScreen() {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // STYLES
-// Replace the entire S = { ... } object in App.jsx with this.
-// Changes vs old version:
-//   • topBar          → display:grid, gridTemplateColumns:"1fr auto 1fr"
-//   • tournamentBlock → column flex, text-align:center
-//   • tournamentName  → Bebas Neue, larger clamp, full white
-//   • statusBlock     → justifyContent:"flex-end"
-//   • main.padding    → wider horizontal padding (players off the edge fix)
-//   • sponsorBar      → taller (minHeight 90px), backdrop blur, flex layout
-//   • NEW: titleSlot, sponsorDivider, sponsorRow, sponsorCell, progressDots,
-//          progressDot, overlayPresentedBy, overlayPresentedByLabel
 // ─────────────────────────────────────────────────────────────────────────────
 const S = {
-  // ── Page shell ─────────────────────────────────────────────────────────────
   page: {
     minHeight: "100dvh",
     background: "#0c0f0c",
@@ -872,8 +899,6 @@ const S = {
     overflow: "hidden",
     position: "relative",
   },
-
-  // ── Court identity badge (CourtScreen only — remove from App.jsx) ───────
   courtBadge: {
     position: "absolute",
     top: 14,
@@ -898,8 +923,6 @@ const S = {
     textTransform: "uppercase",
     fontFamily: "'Bebas Neue',cursive",
   },
-
-  // ── Decorative court lines ─────────────────────────────────────────────────
   courtLines: {
     position: "absolute",
     inset: 0,
@@ -935,8 +958,6 @@ const S = {
     borderRadius: "50%",
     transform: "translate(-50%,-50%)",
   },
-
-  // ── Flash + overlays ───────────────────────────────────────────────────────
   flashOverlay: {
     position: "fixed",
     inset: 0,
@@ -980,7 +1001,6 @@ const S = {
     marginTop: "8px",
     animation: "trophy-bounce 0.6s ease-in-out alternate infinite",
   },
-  // "PRESENTED BY" title sponsor block inside match-won overlay
   overlayPresentedBy: {
     marginTop: 28,
     display: "flex",
@@ -995,18 +1015,14 @@ const S = {
     color: "rgba(255,255,255,0.2)",
     fontFamily: "'DM Sans',sans-serif",
   },
-
-  // ── TOP BAR — 3-column grid ────────────────────────────────────────────────
-  // Col 1: empty  |  Col 2: tournament info (centred)  |  Col 3: status badges
   topBar: {
     position: "relative",
     zIndex: 10,
     display: "grid",
-    gridTemplateColumns: "1fr auto 1fr", // true 3-column balance
+    gridTemplateColumns: "1fr auto 1fr",
     alignItems: "center",
     padding: "clamp(12px,2vh,24px) clamp(16px,3vw,48px)",
   },
-  // Centre column: stacks tournament name above the pills
   tournamentBlock: {
     display: "flex",
     flexDirection: "column",
@@ -1014,7 +1030,6 @@ const S = {
     gap: "8px",
     textAlign: "center",
   },
-  // CHANGED: Bebas Neue + bigger — readable from 8 metres
   tournamentName: {
     fontFamily: "'Bebas Neue', cursive",
     fontSize: "clamp(22px,3vw,42px)",
@@ -1022,7 +1037,6 @@ const S = {
     color: "#fff",
     lineHeight: 1,
   },
-  // Event/match-type pill — grey by default, yellow variant applied inline for event
   matchTypePill: {
     background: "rgba(255,255,255,0.07)",
     border: "1px solid rgba(255,255,255,0.12)",
@@ -1035,12 +1049,11 @@ const S = {
     color: "rgba(255,255,255,0.45)",
     textTransform: "uppercase",
   },
-  // Right column: status badges flush to the right
   statusBlock: {
     display: "flex",
     alignItems: "center",
     gap: "16px",
-    justifyContent: "flex-end", // CHANGED: was no justifyContent
+    justifyContent: "flex-end",
   },
   liveBadge: {
     display: "flex",
@@ -1082,8 +1095,6 @@ const S = {
     flexShrink: 0,
     transition: "background 0.5s ease",
   },
-
-  // ── MAIN SCOREBOARD — 3-column grid ───────────────────────────────────────
   main: {
     position: "relative",
     zIndex: 10,
@@ -1092,7 +1103,6 @@ const S = {
     gridTemplateColumns: "1fr auto 1fr",
     alignItems: "center",
     gap: "clamp(8px,2vw,32px)",
-    // CHANGED: bigger horizontal padding — players were too close to screen edge
     padding: "clamp(16px,3vh,48px) clamp(48px,7vw,120px)",
   },
   teamBlock: {
@@ -1108,8 +1118,6 @@ const S = {
     color: "rgba(255,255,255,0.7)",
     lineHeight: 1.2,
   },
-
-  // ── Centre score block ─────────────────────────────────────────────────────
   centreBlock: {
     display: "flex",
     flexDirection: "column",
@@ -1156,7 +1164,6 @@ const S = {
     color: "rgba(255,255,255,0.15)",
     lineHeight: 1,
   },
-
   gameHistoryRow: {
     display: "flex",
     gap: "8px",
@@ -1173,7 +1180,6 @@ const S = {
     fontFamily: "'DM Mono',monospace",
     letterSpacing: "1px",
   },
-
   countdown: {
     display: "flex",
     flexDirection: "column",
@@ -1195,9 +1201,6 @@ const S = {
     lineHeight: 1,
   },
   countdownColon: { animation: "blink 1s step-end infinite", margin: "0 2px" },
-
-  // ── SPONSOR BAR — tiered layout ────────────────────────────────────────────
-  // CHANGED: taller bar, backdrop blur, flex with dedicated slots
   sponsorBar: {
     position: "relative",
     zIndex: 10,
@@ -1208,13 +1211,9 @@ const S = {
     gap: "clamp(12px,2vw,28px)",
     background: "rgba(0,0,0,0.25)",
     backdropFilter: "blur(8px)",
-    minHeight: "clamp(80px,10vh,100px)", // CHANGED: was ~50px, now 80-100px
+    minHeight: "clamp(80px,10vh,100px)",
   },
-  // Title sponsor anchor — left side, never moves
-  titleSlot: {
-    flexShrink: 0,
-  },
-  // Thin vertical rule between title sponsor and the rest
+  titleSlot: { flexShrink: 0 },
   sponsorDivider: {
     width: 1,
     alignSelf: "stretch",
@@ -1222,7 +1221,6 @@ const S = {
     flexShrink: 0,
     margin: "4px 0",
   },
-  // CHANGED: rotated label (was horizontal, wastes width on wide screen)
   sponsorLabel: {
     fontSize: "clamp(8px,0.7vw,10px)",
     fontWeight: "700",
@@ -1231,22 +1229,18 @@ const S = {
     whiteSpace: "nowrap",
     flexShrink: 0,
     fontFamily: "'DM Sans', sans-serif",
-    writingMode: "vertical-rl", // rotated 90°
-    transform: "rotate(180deg)", // flip so text reads top → bottom
+    writingMode: "vertical-rl",
+    transform: "rotate(180deg)",
   },
-  // Flex row holding the gold + standard sponsor cards
   sponsorRow: {
     flex: 1,
     display: "flex",
     alignItems: "center",
     gap: "clamp(8px,1.5vw,20px)",
     position: "relative",
-    minHeight: 72, // enough room for gold-tier cards
+    minHeight: 72,
   },
-  sponsorCell: {
-    flexShrink: 0,
-  },
-  // Vertical stack of dots (one per carousel sponsor) — right edge
+  sponsorCell: { flexShrink: 0 },
   progressDots: {
     display: "flex",
     flexDirection: "column",
@@ -1266,8 +1260,6 @@ const S = {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CSS ANIMATIONS
-// Replace the CSS template string in App.jsx with this.
-// Addition: shuttleFloat (idle screen only — harmless to include in App.jsx)
 // ─────────────────────────────────────────────────────────────────────────────
 const CSS = `
   @import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@400;600;700&family=DM+Mono&display=swap');

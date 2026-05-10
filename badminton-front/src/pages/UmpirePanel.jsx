@@ -66,13 +66,25 @@ export default function UmpirePanel() {
   }, [state.team1Score, state.team2Score]);
 
   // ── Game won banner ──────────────────────────────────────────────────────
+  // ── Game won banner ──────────────────────────────────────────────────────
+  const gameWonTimerRef = useRef(null);
+
   useEffect(() => {
-    if (state.gameWon) {
+    if (state.gameWon && !state.matchWon) {
+      // Clear any existing timer first
+      clearTimeout(gameWonTimerRef.current);
       setGameWonBanner(true);
-      const t = setTimeout(() => setGameWonBanner(false), 2500);
-      return () => clearTimeout(t);
+      gameWonTimerRef.current = setTimeout(() => {
+        setGameWonBanner(false);
+      }, 2500);
+    } else {
+      // gameWon reset to false (next point scored) — clear banner immediately
+      clearTimeout(gameWonTimerRef.current);
+      setGameWonBanner(false);
     }
-  }, [state.gameWon, state.currentGame]);
+    return () => clearTimeout(gameWonTimerRef.current);
+  }, [state.gameWon, state.matchWon]);
+  // ↑ removed state.currentGame from deps — that was causing double-firing
 
   // ── Action handlers — plain functions, NO useCallback ───────────────────
   // Each render gets a fresh sendAction from the hook. These functions
@@ -103,9 +115,16 @@ export default function UmpirePanel() {
   const handleLogout = () => {
     sessionStorage.removeItem(`umpire_token_${matchId}`);
     localStorage.removeItem(`umpire_token_${matchId}`);
-    navigate("/umpire");
+    navigate("/umpire/login");
   };
-
+  // ✅ Clear any stale overlay state when matchId changes
+  const prevMatchIdRef = useRef(matchId);
+  useEffect(() => {
+    if (prevMatchIdRef.current !== matchId) {
+      prevMatchIdRef.current = matchId;
+      setGameWonBanner(false);
+    }
+  }, [matchId]);
   // ── Safe derived values ──────────────────────────────────────────────────
   const p1t1Name = matchMeta?.player1_team1_detail?.name ?? "";
   const p2t1Name = matchMeta?.player2_team1_detail?.name ?? "";
@@ -165,7 +184,10 @@ export default function UmpirePanel() {
           <div style={S.errorBox}>
             <div style={S.errorTitle}>Could not load match</div>
             <div style={S.errorDetail}>{metaError}</div>
-            <button style={S.retryBtn} onClick={() => navigate("/umpire")}>
+            <button
+              style={S.retryBtn}
+              onClick={() => navigate("/umpire/login")}
+            >
               ← Back to match list
             </button>
           </div>
@@ -174,6 +196,37 @@ export default function UmpirePanel() {
     );
   }
 
+  // Match won overlay auto-redirect countdown (15 seconds)
+  const AUTO_REDIRECT_SECONDS = 15;
+
+  function MatchWonOverlay({ winner, onDismiss }) {
+    const [countdown, setCountdown] = useState(AUTO_REDIRECT_SECONDS);
+
+    useEffect(() => {
+      if (countdown <= 0) {
+        onDismiss();
+        return;
+      }
+      const t = setTimeout(() => setCountdown((c) => c - 1), 1000);
+      return () => clearTimeout(t);
+    }, [countdown, onDismiss]);
+
+    return (
+      <div style={S.matchWonOverlay}>
+        <div style={S.matchWonTitle}>🏆 MATCH WON</div>
+        <div style={S.matchWonTeam}>{winner}</div>
+
+        {/* Countdown ring */}
+        <div style={S.matchWonCountdown}>Redirecting in {countdown}s…</div>
+
+        {/* Close button */}
+        <button style={S.matchWonCloseBtn} onClick={onDismiss}>
+          ✕ Close
+        </button>
+      </div>
+    );
+  }
+  // match overlay finished.
   // ── Main render ──────────────────────────────────────────────────────────
   return (
     <div style={S.page}>
@@ -194,13 +247,24 @@ export default function UmpirePanel() {
       )}
 
       {/* Match won overlay */}
-      {state.matchWon && (
+      {/* {state.matchWon && (
         <div style={S.matchWonOverlay}>
           <div style={S.matchWonTitle}>🏆 MATCH WON</div>
           <div style={S.matchWonTeam}>
             {state.winner === 1 ? team1Name : team2Name}
           </div>
         </div>
+      )} */}
+
+      {/* Match won overlay */}
+      {state.matchWon && (
+        <MatchWonOverlay
+          winner={state.winner === 1 ? team1Name : team2Name}
+          onDismiss={() => {
+            const isLoggedIn = !!localStorage.getItem("access_token");
+            navigate(isLoggedIn ? "/umpire/dashboard" : "/umpire/score-entry");
+          }}
+        />
       )}
 
       {/* Header */}
@@ -755,6 +819,25 @@ const S = {
     letterSpacing: "3px",
     color: "#22c55e",
     padding: "18px",
+  },
+  matchWonCountdown: {
+    fontSize: "13px",
+    color: "rgba(255,255,255,0.35)",
+    letterSpacing: "1px",
+    marginTop: "8px",
+  },
+  matchWonCloseBtn: {
+    marginTop: "20px",
+    padding: "12px 36px",
+    borderRadius: "10px",
+    border: "1px solid rgba(255,255,255,0.2)",
+    background: "transparent",
+    color: "#fff",
+    fontSize: "14px",
+    fontWeight: "700",
+    letterSpacing: "2px",
+    cursor: "pointer",
+    fontFamily: "'DM Sans', sans-serif",
   },
 };
 

@@ -184,13 +184,24 @@ class MatchConsumer(AsyncWebsocketConsumer):
         except Match.DoesNotExist:
             return None
 
+    # @database_sync_to_async
+    # def _apply_point(self, team: int) -> dict:
+    #     print(f"[consumer] _apply_point team={team} match_id={self.match_id}")
+    #     match  = Match.objects.prefetch_related('game_scores').get(pk=self.match_id)
+    #     print(f"[consumer] match status={match.status}")
+    #     result = match.apply_point(team)
+    #     print(f"[consumer] apply_point result={result}")
+    #     match.game_scores._result_cache = None  # bust the prefetch cache
+    #     result.update(self._build_game_scores(match))
+    #     result['server_id'] = match.server_id
+    #     result['match_id']  = match.id
+    #     result['error']     = None
+    #     return result
     @database_sync_to_async
     def _apply_point(self, team: int) -> dict:
-        print(f"[consumer] _apply_point team={team} match_id={self.match_id}")
-        match  = Match.objects.prefetch_related('game_scores').get(pk=self.match_id)
-        print(f"[consumer] match status={match.status}")
+        match = Match.objects.get(pk=self.match_id)   # ← no prefetch_related yet
         result = match.apply_point(team)
-        print(f"[consumer] apply_point result={result}")
+        match = Match.objects.prefetch_related('game_scores').get(pk=self.match_id)
         result.update(self._build_game_scores(match))
         result['server_id'] = match.server_id
         result['match_id']  = match.id
