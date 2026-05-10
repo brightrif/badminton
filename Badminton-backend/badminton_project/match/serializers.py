@@ -92,12 +92,13 @@ class TournamentVenueSerializer(serializers.ModelSerializer):
 
 class SponsorSerializer(serializers.ModelSerializer):
     logo_url = serializers.SerializerMethodField()
+    logo = serializers.ImageField(write_only=True, required=False, allow_null=True)
     tournament_name = serializers.CharField(source='tournament.name', read_only=True)
 
     class Meta:
         model = Sponsor
         fields = [
-            'id', 'name', 'logo_url', 'tournament', 'tournament_name',
+            'id', 'name', 'logo_url','logo', 'tournament', 'tournament_name',
             'priority', 'created_at', 'updated_at'
         ]
         read_only_fields = ['created_at', 'updated_at']
@@ -134,12 +135,13 @@ class PlayerSerializer(serializers.ModelSerializer):
     country_code = serializers.CharField(source='country.code', read_only=True)
     matches_count = serializers.SerializerMethodField()
     photo_url = serializers.SerializerMethodField()
+    photo = serializers.ImageField(write_only=True, required=False, allow_null=True)
 
     class Meta:
         model = Player
         fields = [
             'id', 'name', 'country', 'country_name', 'country_code',
-            'photo_url', 'matches_count', 'created_at', 'updated_at'
+            'photo_url','photo', 'matches_count', 'created_at', 'updated_at'
         ]
         read_only_fields = ['created_at', 'updated_at']
 

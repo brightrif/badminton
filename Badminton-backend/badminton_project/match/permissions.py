@@ -6,4 +6,4 @@ class IsDirectorOrReadOnly(BasePermission):
             return True  # GET is open (big screen needs it)
         if not request.user or not request.user.is_authenticated:
             return False
-        return request.user.groups.filter(name='directors').is_authenticated or request.user.is_staff
+        return request.user.groups.filter(name='directors').exists() or request.user.is_staff

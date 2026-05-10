@@ -7,10 +7,12 @@ from rest_framework import viewsets, filters, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import AllowAny, IsAuthenticated
+from .permissions import IsDirectorOrReadOnly
 from django_filters.rest_framework import DjangoFilterBackend
 from django.db.models import Q
 from django.utils import timezone
 from rest_framework_simplejwt.authentication import JWTAuthentication
+from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 
 from .models import (
     Country, Tournament, Player, Sponsor, Match, GameScore, Venue,
@@ -34,7 +36,7 @@ TOKEN_TTL_SECONDS = 60 * 60 * 12   # 12 hours
 class CountryViewSet(viewsets.ModelViewSet):
     queryset = Country.objects.all()
     serializer_class = CountrySerializer
-    permission_classes = [AllowAny]
+    permission_classes = [IsDirectorOrReadOnly]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     search_fields = ['name', 'code']
     ordering_fields = ['name', 'code']
@@ -63,7 +65,7 @@ class CountryViewSet(viewsets.ModelViewSet):
 class VenueViewSet(viewsets.ModelViewSet):
     queryset = Venue.objects.all()
     serializer_class = VenueSerializer
-    permission_classes = [AllowAny]
+    permission_classes = [IsDirectorOrReadOnly]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['country', 'has_parking', 'has_cafeteria', 'has_livestream']
     search_fields = ['name', 'city', 'address']
@@ -107,7 +109,7 @@ class VenueViewSet(viewsets.ModelViewSet):
 class CourtViewSet(viewsets.ModelViewSet):
     queryset = Court.objects.all()
     serializer_class = CourtSerializer
-    permission_classes = [AllowAny]
+    permission_classes = [IsDirectorOrReadOnly]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['venue', 'court_type', 'surface_type', 'is_active']
     search_fields = ['name', 'slug']
@@ -154,7 +156,7 @@ class CourtViewSet(viewsets.ModelViewSet):
 class TournamentViewSet(viewsets.ModelViewSet):
     queryset = Tournament.objects.all()
     serializer_class = TournamentSerializer
-    permission_classes = [AllowAny]
+    permission_classes = [IsDirectorOrReadOnly]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     search_fields = ['name']
     ordering_fields = ['name', 'start_date', 'end_date', 'created_at']
@@ -209,7 +211,8 @@ class TournamentViewSet(viewsets.ModelViewSet):
 class PlayerViewSet(viewsets.ModelViewSet):
     queryset = Player.objects.all()
     serializer_class = PlayerSerializer
-    permission_classes = [AllowAny]
+    permission_classes = [IsDirectorOrReadOnly]
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['country']
     search_fields = ['name']
@@ -265,7 +268,7 @@ class PlayerViewSet(viewsets.ModelViewSet):
 class MatchViewSet(viewsets.ModelViewSet):
     queryset = Match.objects.all()
     serializer_class = MatchSerializer
-    permission_classes = [AllowAny]
+    permission_classes = [IsDirectorOrReadOnly]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['tournament', 'status', 'match_type', 'venue', 'court']
     search_fields = [
@@ -473,7 +476,8 @@ class MatchViewSet(viewsets.ModelViewSet):
 class SponsorViewSet(viewsets.ModelViewSet):
     queryset = Sponsor.objects.all()
     serializer_class = SponsorSerializer
-    permission_classes = [AllowAny]
+    permission_classes = [IsDirectorOrReadOnly]
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['tournament']
     search_fields = ['name']
@@ -491,7 +495,7 @@ class SponsorViewSet(viewsets.ModelViewSet):
 class GameScoreViewSet(viewsets.ModelViewSet):
     queryset = GameScore.objects.all()
     serializer_class = GameScoreSerializer
-    permission_classes = [AllowAny]
+    permission_classes = [IsDirectorOrReadOnly]
     filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
     filterset_fields = ['match', 'game_number']
     ordering_fields = ['game_number']
@@ -508,7 +512,7 @@ class GameScoreViewSet(viewsets.ModelViewSet):
 class TournamentVenueViewSet(viewsets.ModelViewSet):
     queryset = TournamentVenue.objects.all()
     serializer_class = TournamentVenueSerializer
-    permission_classes = [AllowAny]
+    permission_classes = [IsDirectorOrReadOnly]
     filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
     filterset_fields = ['tournament', 'venue']
     ordering_fields = ['start_date', 'end_date']

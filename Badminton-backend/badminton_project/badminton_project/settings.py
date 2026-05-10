@@ -9,6 +9,7 @@ Changes from original:
 
 import os
 from pathlib import Path
+from corsheaders.defaults import default_headers
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -73,7 +74,7 @@ CHANNEL_LAYERS = {
 # ─── REST FRAMEWORK ──────────────────────────────────────────────────────────
 REST_FRAMEWORK = {
     'DEFAULT_PERMISSION_CLASSES': [
-        'rest_framework.permissions.AllowAny',
+        'rest_framework.permissions.IsAuthenticated', 
     ],
     'DEFAULT_AUTHENTICATION_CLASSES': [
         'rest_framework_simplejwt.authentication.JWTAuthentication',
@@ -164,3 +165,10 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 MEDIA_URL = '/media/'
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
+
+
+CORS_ALLOW_HEADERS = list(default_headers) + [
+    'Authorization',
+]
+
+CORS_ALLOW_CREDENTIALS = True
