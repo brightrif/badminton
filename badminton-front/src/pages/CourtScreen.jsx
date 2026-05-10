@@ -20,8 +20,8 @@ import { useParams } from "react-router-dom";
 import { Dot } from "lucide-react";
 import PlayerCard from "../components/PlayerCard";
 import SponsorDisplay from "../components/SponsorDisplay";
-import { useMatchSocket } from "../hooks/useMatchSocket";
 import { getTier } from "../utils/sponsorTiers";
+import { useMatchSocket } from "../hooks/useMatchSocket";
 
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000/api";
 const POLL_INTERVAL = 30_000; // 30 seconds between live-match polls
@@ -132,7 +132,13 @@ function FullScreenMessage({ text, sub, pulse }) {
 }
 
 // ── IdleScreen ────────────────────────────────────────────────────────────────
-function IdleScreen({ courtName, venueName, nextMatch, sponsors = [] }) {
+function IdleScreen({
+  courtName,
+  venueName,
+  nextMatch,
+  sponsors = [],
+  tournamentName = "",
+}) {
   const [sponsorIndex, setSponsorIndex] = useState(0);
 
   const titleSponsors = sponsors.filter((s) => getTier(s.priority) === "title");
@@ -157,11 +163,52 @@ function IdleScreen({ courtName, venueName, nextMatch, sponsors = [] }) {
         <div style={S.courtCenter} />
       </div>
 
-      {/* Court identity badge */}
+      {/* Court identity badge — top-left */}
       <div style={S.courtBadge}>
         <span style={S.courtBadgeVenue}>{venueName}</span>
         <span style={S.courtBadgeName}>{courtName}</span>
       </div>
+      {/* Temp debug */}
+      <div
+        style={{
+          color: "red",
+          position: "fixed",
+          top: 0,
+          right: 0,
+          fontSize: 12,
+        }}
+      >
+        tn="{tournamentName}" sp={sponsors.length}
+      </div>
+      {/* Tournament name — top-centre */}
+      {tournamentName && (
+        <div
+          style={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            right: 0,
+            zIndex: 20,
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            padding: "clamp(12px,2vh,24px) clamp(16px,3vw,48px)",
+            pointerEvents: "none",
+          }}
+        >
+          <span
+            style={{
+              fontFamily: "'Bebas Neue', cursive",
+              fontSize: "clamp(22px,3vw,42px)",
+              letterSpacing: "4px",
+              color: "#fff",
+              lineHeight: 1,
+            }}
+          >
+            {tournamentName}
+          </span>
+        </div>
+      )}
 
       {/* Centre content */}
       <div
@@ -174,6 +221,7 @@ function IdleScreen({ courtName, venueName, nextMatch, sponsors = [] }) {
           gap: 24,
           position: "relative",
           zIndex: 10,
+          paddingTop: tournamentName ? "clamp(50px,8vh,80px)" : 0,
         }}
       >
         <div
@@ -207,7 +255,7 @@ function IdleScreen({ courtName, venueName, nextMatch, sponsors = [] }) {
               textAlign: "center",
             }}
           >
-            <div
+            {/* <div
               style={{
                 fontFamily: "'DM Sans',sans-serif",
                 fontSize: "clamp(10px,1vw,13px)",
@@ -218,6 +266,42 @@ function IdleScreen({ courtName, venueName, nextMatch, sponsors = [] }) {
               }}
             >
               UP NEXT
+            </div> */}
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 12,
+                marginBottom: 14,
+              }}
+            >
+              <span
+                style={{
+                  fontFamily: "'DM Sans',sans-serif",
+                  fontSize: "clamp(10px,1vw,13px)",
+                  fontWeight: 700,
+                  letterSpacing: 4,
+                  color: "rgba(255,255,255,0.25)",
+                }}
+              >
+                UP NEXT
+              </span>
+              {nextMatch.eventName && (
+                <>
+                  <span style={{ color: "rgba(255,255,255,0.15)" }}>·</span>
+                  <span
+                    style={{
+                      fontFamily: "'DM Sans',sans-serif",
+                      fontSize: "clamp(10px,1vw,13px)",
+                      fontWeight: 700,
+                      letterSpacing: 4,
+                      color: "#e8ff47",
+                    }}
+                  >
+                    {nextMatch.eventName.toUpperCase()}
+                  </span>
+                </>
+              )}
             </div>
             <div
               style={{
@@ -311,6 +395,7 @@ export default function CourtScreen() {
   const [matchMeta, setMatchMeta] = useState(null);
   const [nextMatch, setNextMatch] = useState(null);
   const [sponsors, setSponsors] = useState([]);
+  const [tournamentName, setTournamentName] = useState("");
 
   const [flashTeam, setFlashTeam] = useState(null);
   const [gameWonOverlay, setGameWonOverlay] = useState(null);
@@ -331,17 +416,35 @@ export default function CourtScreen() {
   // ── Helper: fetch sponsors filtered by tournament ID ──────────────────────
   // This is the single source of truth for sponsor fetching.
   // Always filtered by tournament so we never mix sponsors across tournaments.
-  const fetchSponsorsForTournament = useCallback((tournamentId) => {
-    if (!tournamentId) return;
-    fetch(`${API_BASE}/sponsors/?tournament=${tournamentId}&ordering=-priority`)
-      .then((r) => r.json())
-      .then((d) => {
-        const arr = Array.isArray(d) ? d : (d.results ?? []);
-        if (arr.length > 0) setSponsors(arr);
-        // If empty (tournament has no sponsors), keep existing sponsors visible
-      })
-      .catch((e) => console.error("[CourtScreen] sponsors fetch error:", e));
-  }, []);
+  const fetchSponsorsForTournament = useCallback(
+    (tournamentId, nameHint = "") => {
+      if (!tournamentId) return;
+      // Set name immediately if we already have it from the match list response
+      if (nameHint) setTournamentName(nameHint);
+      // Fetch sponsors filtered by tournament
+      fetch(
+        `${API_BASE}/sponsors/?tournament=${tournamentId}&ordering=-priority`,
+      )
+        .then((r) => r.json())
+        .then((d) => {
+          const arr = Array.isArray(d) ? d : (d.results ?? []);
+          if (arr.length > 0) setSponsors(arr);
+          // ✅ tournament_name comes free with every sponsor object
+          if (arr[0].tournament_name) setTournamentName(arr[0].tournament_name);
+        })
+        .catch((e) => console.error("[CourtScreen] sponsors fetch error:", e));
+      // Also fetch tournament detail to get its name (if not already known)
+      //   if (!nameHint) {
+      //     fetch(`${API_BASE}/tournaments/${tournamentId}/`)
+      //       .then((r) => r.json())
+      //       .then((d) => {
+      //         if (d.name) setTournamentName(d.name);
+      //       })
+      //       .catch(() => {});
+      //   }
+    },
+    [],
+  );
 
   // ── 1. Resolve court by slug ──────────────────────────────────────────────
   useEffect(() => {
@@ -385,7 +488,7 @@ export default function CourtScreen() {
         setMatchId((prev) => (prev === m.id ? prev : m.id));
         setNextMatch(null);
         // ✅ Priority 1 — fetch sponsors for live match's tournament
-        fetchSponsorsForTournament(m.tournament);
+        fetchSponsorsForTournament(m.tournament, m.tournament_name ?? "");
         return;
       }
 
@@ -413,9 +516,10 @@ export default function CourtScreen() {
           team1: t1,
           team2: t2,
           scheduled_time: u.scheduled_time,
+          eventName: u.event_name ?? "",
         });
         // ✅ Priority 2 — fetch sponsors for upcoming match's tournament
-        fetchSponsorsForTournament(u.tournament);
+        fetchSponsorsForTournament(u.tournament, u.tournament_name ?? "");
         return;
       }
 
@@ -429,11 +533,31 @@ export default function CourtScreen() {
         .then((d) => (Array.isArray(d) ? d : (d.results ?? [])));
 
       if (recent.length > 0) {
-        // ✅ Priority 3 — fallback: sponsors from most recent completed match
-        fetchSponsorsForTournament(recent[0].tournament);
+        // ✅ Priority 3 — sponsors from most recent completed match's tournament
+        fetchSponsorsForTournament(
+          recent[0].tournament,
+          recent[0].tournament_name ?? "",
+        );
+      } else {
+        // ✅ Priority 4 — no matches at all on this court, load all sponsors
+        // so idle screen is never blank (e.g. fresh court with no history)
+        console.log(
+          "[CourtScreen] no matches on court — fetching all sponsors",
+        );
+        fetch(`${API_BASE}/sponsors/?ordering=-priority`)
+          .then((r) => r.json())
+          .then((d) => {
+            const arr = Array.isArray(d) ? d : (d.results ?? []);
+            console.log(
+              `[CourtScreen] all sponsors fetched: ${arr.length}`,
+              arr,
+            );
+            if (arr.length > 0) setSponsors(arr);
+          })
+          .catch((e) =>
+            console.error("[CourtScreen] all-sponsors fetch error:", e),
+          );
       }
-      // If no matches at all on this court, sponsors stay as-is (empty or
-      // whatever was previously loaded — nothing to show is fine)
     } catch (e) {
       console.error("[CourtScreen] poll error:", e);
     }
@@ -457,7 +581,7 @@ export default function CourtScreen() {
         );
         if (cancelled) return;
         setMatchMeta(detail);
-
+        if (detail.tournament_name) setTournamentName(detail.tournament_name);
         // Sponsors are already fetched in pollForMatch via fetchSponsorsForTournament,
         // but we re-fetch here too in case matchId changed via WebSocket push
         // (not just polling), ensuring sponsors always match the current match.
@@ -521,7 +645,9 @@ export default function CourtScreen() {
   useEffect(() => {
     if (state.matchWon) setMatchWonOverlay({ winner: state.winner });
   }, [state.matchWon, state.winner]);
-
+  useEffect(() => {
+    setMatchWonOverlay(null);
+  }, [matchId]);
   // ── 7. Sponsor carousel ───────────────────────────────────────────────────
   useEffect(() => {
     if (carouselSponsors.length <= 4) return;
@@ -542,6 +668,7 @@ export default function CourtScreen() {
         venueName={court.venue_name}
         nextMatch={nextMatch}
         sponsors={sponsors}
+        tournamentName={tournamentName}
       />
     );
   }
@@ -564,7 +691,6 @@ export default function CourtScreen() {
       .filter(Boolean)
       .join(" / ") || "Team 2";
 
-  const tournamentName = p.tournament_name ?? "";
   const matchType = p.match_type ?? "";
   const eventName = p.event_name ?? "";
 

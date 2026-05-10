@@ -446,8 +446,15 @@ function MatchForm({ initial, onSave, onClose }) {
     player1_team2: initial?.player1_team2 || "",
     player2_team2: initial?.player2_team2 || "",
     server: initial?.server || "",
+    // scheduled_time: initial?.scheduled_time
+    //   ? initial.scheduled_time.slice(0, 16)
+    //   : "",
     scheduled_time: initial?.scheduled_time
-      ? initial.scheduled_time.slice(0, 16)
+      ? (() => {
+          const d = new Date(initial.scheduled_time);
+          const pad = (n) => String(n).padStart(2, "0");
+          return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+        })()
       : "",
     venue: initial?.venue || "",
     court: initial?.court || "",
@@ -668,7 +675,10 @@ function MatchForm({ initial, onSave, onClose }) {
       scoring_format: form.scoring_format,
       player1_team1: Number(form.player1_team1),
       player1_team2: Number(form.player1_team2),
-      scheduled_time: form.scheduled_time,
+      // scheduled_time: form.scheduled_time,
+      scheduled_time: form.scheduled_time
+        ? new Date(form.scheduled_time).toISOString()
+        : "",
       status: form.status,
     };
     if (form.event) payload.event = Number(form.event);

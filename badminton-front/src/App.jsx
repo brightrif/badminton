@@ -121,6 +121,9 @@ export default function App() {
   useEffect(() => {
     if (state.matchWon) {
       setMatchWonOverlay({ winner: state.winner });
+    } else {
+      // ✅ state.matchWon flipped to false = new match connected, clear overlay
+      setMatchWonOverlay(null);
     }
   }, [state.matchWon, state.winner]);
 

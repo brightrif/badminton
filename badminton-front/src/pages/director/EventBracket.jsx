@@ -238,8 +238,15 @@ function ScheduleMatchModal({ bm, onSave, onClose }) {
   const existing = bm.match_detail;
 
   const [form, setForm] = useState({
+    // scheduled_time: existing?.scheduled_time
+    //   ? new Date(existing.scheduled_time).toISOString().slice(0, 16)
+    //   : "",
     scheduled_time: existing?.scheduled_time
-      ? new Date(existing.scheduled_time).toISOString().slice(0, 16)
+      ? (() => {
+          const d = new Date(existing.scheduled_time);
+          const pad = (n) => String(n).padStart(2, "0");
+          return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+        })()
       : "",
     venue: "",
     court: "",
@@ -265,7 +272,10 @@ function ScheduleMatchModal({ bm, onSave, onClose }) {
         {
           method: "POST",
           body: JSON.stringify({
-            scheduled_time: form.scheduled_time,
+            // scheduled_time: form.scheduled_time,
+            scheduled_time: form.scheduled_time
+              ? new Date(form.scheduled_time).toISOString()
+              : "",
             ...(form.venue && { venue: Number(form.venue) }),
             ...(form.court && { court: Number(form.court) }),
             scoring_format: form.scoring_format,
