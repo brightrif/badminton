@@ -22,6 +22,9 @@ import PlayerCard from "../components/PlayerCard";
 import SponsorDisplay from "../components/SponsorDisplay";
 import { getTier } from "../utils/sponsorTiers";
 import { useMatchSocket } from "../hooks/useMatchSocket";
+// New hook for court-level WebSocket (break mode)
+import { useCourtSocket } from "../hooks/useCourtSocket";
+import BreakScreen from "../components/BreakScreen";
 
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000/api";
 const POLL_INTERVAL = 30_000; // 30 seconds between live-match polls
@@ -413,6 +416,14 @@ export default function CourtScreen() {
   );
   const carouselSponsors = [...goldSponsors, ...standardSponsors];
 
+  // ── Break mode — director-controlled via WebSocket ───────────────────────
+  const {
+    breakMode,
+    breakDisplayMode,
+    breakVideoUrl,
+    breakTournament,
+    breakSponsors,
+  } = useCourtSocket(slug);
   // ── Helper: fetch sponsors filtered by tournament ID ──────────────────────
   // This is the single source of truth for sponsor fetching.
   // Always filtered by tournament so we never mix sponsors across tournaments.
@@ -656,7 +667,17 @@ export default function CourtScreen() {
     }, 4000);
     return () => clearInterval(t);
   }, [carouselSponsors.length]);
-
+  // Director activated break mode — override everything with the sponsor showcase
+  if (breakMode) {
+    return (
+      <BreakScreen
+        tournamentName={breakTournament || tournamentName}
+        sponsors={breakSponsors.length > 0 ? breakSponsors : sponsors}
+        videoUrl={breakVideoUrl}
+        displayMode={breakDisplayMode}
+      />
+    );
+  }
   // ── Guards ────────────────────────────────────────────────────────────────
   if (courtLoading) return <FullScreenMessage text="LOADING…" pulse />;
   if (courtError)

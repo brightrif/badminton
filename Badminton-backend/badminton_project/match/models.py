@@ -101,6 +101,22 @@ class Court(models.Model):
     court_type = models.CharField(max_length=20, choices=COURT_TYPE_CHOICES, default='INDOOR')
     surface_type = models.CharField(max_length=20, choices=SURFACE_TYPE_CHOICES, default='WOOD')
     is_active = models.BooleanField(default=True)
+    break_mode = models.BooleanField(
+    default=False,
+    help_text="When True the court screen switches to the break/sponsor showcase.",
+    )
+    break_video = models.FileField(
+        upload_to='break_videos/',
+        blank=True,
+        null=True,
+        help_text="Optional MP4 ad video shown on the break screen (loops automatically).",
+    )
+    break_display_mode = models.CharField(
+        max_length=10,
+        choices=[('sponsors', 'Sponsors'), ('video', 'Video')],
+        default='sponsors',
+        help_text="What to show on the break screen: sponsor showcase or ad video.",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     def save(self, *args, **kwargs):

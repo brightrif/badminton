@@ -3,7 +3,7 @@ import hashlib
 import time
 from django.conf import settings
 
-from rest_framework import viewsets, filters, status
+from rest_framework import viewsets, filters, status,parsers
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -25,6 +25,9 @@ from .serializers import (
     VenueListSerializer, TournamentVenueSerializer, CourtSerializer
 )
 from .token_auth import make_token, verify_token
+
+from asgiref.sync import async_to_sync
+from channels.layers import get_channel_layer
 
 TOKEN_TTL_SECONDS = 60 * 60 * 12   # 12 hours
 
@@ -148,7 +151,118 @@ class CourtViewSet(viewsets.ModelViewSet):
             )
         return Response(CourtSerializer(court).data)
 
+    @action(
+        detail=True,
+        methods=['patch'],
+        url_path='break_mode',
+        permission_classes=[IsDirectorOrReadOnly],
+        parser_classes=[parsers.MultiPartParser, parsers.FormParser, parsers.JSONParser],
+    )
+    def break_mode(self, request, pk=None):
+        """
+        PATCH /api/courts/<id>/break_mode/
+ 
+        Body (multipart/form-data or JSON):
+            active      : bool   – True to start break mode, False to end it
+            video       : file   – (optional) MP4 to upload/replace
+            clear_video : bool   – (optional) True to remove the existing video
+ 
+        Side-effects:
+            1. Saves break_mode + optional video to the Court row
+            2. Pushes a WebSocket message to group court_<slug> so all
+               connected CourtScreen instances switch instantly
+        """
 
+        
+ 
+        court = self.get_object()
+ 
+        # ── 1. Parse fields ───────────────────────────────────────────────────
+        active_raw = request.data.get('active', None)
+        if active_raw is None:
+            return Response(
+                {'error': "'active' field is required (true/false)."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+ 
+        # Accept both JSON boolean and form-data string
+        if isinstance(active_raw, str):
+            active = active_raw.lower() in ('true', '1', 'yes')
+        else:
+            active = bool(active_raw)
+
+
+        display_mode = request.data.get('display_mode', None)
+        if display_mode in ('sponsors', 'video'):
+            court.break_display_mode = display_mode
+        court.save(update_fields=['break_mode', 'break_video', 'break_display_mode'])
+        # ── 2. Handle video upload / removal ─────────────────────────────────
+        video_file = request.FILES.get('video')
+        clear_video = request.data.get('clear_video', False)
+        if isinstance(clear_video, str):
+            clear_video = clear_video.lower() in ('true', '1', 'yes')
+ 
+        if clear_video and court.break_video:
+            court.break_video.delete(save=False)
+            court.break_video = None
+ 
+        if video_file:
+            # Delete old file before saving new one to avoid orphans
+            if court.break_video:
+                court.break_video.delete(save=False)
+            court.break_video = video_file
+ 
+        court.break_mode = active
+        court.save(update_fields=['break_mode', 'break_video'])
+ 
+        # ── 3. Build video URL for the WS payload ────────────────────────────
+        video_url = ''
+        if court.break_video:
+            video_url = request.build_absolute_uri(court.break_video.url)
+ 
+        # ── 4. Collect sponsors for this court's active tournament ────────────
+        tournament_name = ''
+        sponsors_payload = []
+ 
+        ref_match = (
+            court.matches.filter(status='Live').order_by('-scheduled_time').first()
+            or court.matches.filter(status='Upcoming').order_by('scheduled_time').first()
+            or court.matches.filter(status='Completed').order_by('-scheduled_time').first()
+        )
+ 
+        if ref_match and ref_match.tournament:
+            tournament_name = ref_match.tournament.name
+            for s in Sponsor.objects.filter(tournament=ref_match.tournament).order_by('-priority'):
+                logo_url = request.build_absolute_uri(s.logo.url) if s.logo else ''
+                sponsors_payload.append({
+                    'id': s.id,
+                    'name': s.name,
+                    'priority': s.priority,
+                    'logo_url': logo_url,
+                })
+ 
+        # ── 5. Broadcast via channel layer ───────────────────────────────────
+        channel_layer = get_channel_layer()
+        async_to_sync(channel_layer.group_send)(
+            f'court_{court.slug}',
+            {
+                'type':            'break_mode_message',  # maps to CourtConsumer.break_mode_message
+                'active':          active,
+                'display_mode':    court.break_display_mode,
+                'video_url':       video_url,
+                'tournament_name': tournament_name,
+                'sponsors':        sponsors_payload,
+            }
+        )
+ 
+        return Response({
+            'id':              court.id,
+            'slug':            court.slug,
+            'break_mode':      court.break_mode,
+            'break_video_url': video_url,
+            'tournament_name': tournament_name,
+            'display_mode':    court.break_display_mode,
+        })
 # ─────────────────────────────────────────────────────────────────────────────
 # Tournament
 # ─────────────────────────────────────────────────────────────────────────────

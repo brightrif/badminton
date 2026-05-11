@@ -211,7 +211,7 @@ class MatchConsumer(AsyncWebsocketConsumer):
     @database_sync_to_async
     def _set_server(self, player_id: int,receiver_id: int = None) -> dict:
         match  = Match.objects.get(pk=self.match_id)
-        result = match.set_server(player_id)
+        result = match.set_server(player_id,receiver_id)
         state  = self._build_state_snapshot(match)
         result.update(state)
         result['match_id'] = match.id

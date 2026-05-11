@@ -26,19 +26,33 @@ class CountrySerializer(serializers.ModelSerializer):
 class CourtSerializer(serializers.ModelSerializer):
     venue_name = serializers.CharField(source='venue.name', read_only=True)
     screen_url = serializers.SerializerMethodField()
-
+    break_video_url = serializers.SerializerMethodField()
     class Meta:
         model = Court
         fields = [
             'id', 'name','slug','screen_url','court_type', 'surface_type', 
-            'is_active', 'venue', 'venue_name', 'created_at'
+            'is_active', 'venue', 'venue_name', 'created_at',
+            # break mode
+            'break_mode',       # ← NEW
+            'break_video',      # ← NEW (write-only upload field)
+            'break_video_url',  # ← NEW (read-only absolute URL)
+            'break_display_mode',
         ]
         read_only_fields = ['created_at']
+        extra_kwargs = {
+            'break_video': {'write_only': True, 'required': False, 'allow_null': True},
+        }
 
     def get_screen_url(self, obj):
         request = self.context.get('request')
         if request:
             return request.build_absolute_uri(f'/screen/court/{obj.slug}/')
+        return ''
+    def get_break_video_url(self, obj):
+        """Return an absolute URL to the uploaded break video, or empty string."""
+        if obj.break_video:
+            request = self.context.get('request')
+            return request.build_absolute_uri(obj.break_video.url) if request else obj.break_video.url
         return ''
 
 class VenueSerializer(serializers.ModelSerializer):
