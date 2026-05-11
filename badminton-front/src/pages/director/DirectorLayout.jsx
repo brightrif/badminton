@@ -10,6 +10,7 @@ const NAV = [
   { to: "/director/players", icon: "👤", label: "Players" },
   { to: "/director/sponsors", icon: "★", label: "Sponsors" },
   { to: "/director/venues", icon: "📍", label: "Venues" },
+  { to: "/director/help", icon: "❓", label: "Help & Links" },
 ];
 
 export default function DirectorLayout() {

@@ -20,6 +20,7 @@ import DirectorMatches from "./pages/director/Matches";
 import DirectorPlayers from "./pages/director/Players";
 import DirectorSponsors from "./pages/director/Sponsors";
 import DirectorVenues from "./pages/director/Venues";
+import Help from "./pages/director/Help";
 
 // ── Bracket system ─────────────────────────────────────────────────────────────
 import DirectorEvents from "./pages/director/Events";
@@ -28,6 +29,11 @@ import EventBracket from "./pages/director/EventBracket";
 import UmpireLogin from "./pages/UmpireLogin";
 import UmpireDashboard from "./pages/UmpireDashboard";
 import ProtectedUmpire from "./components/ProtectedUmpire";
+
+// ── spectator routes ─────────────────────────────────────────────────────────────
+import TournamentList from "./pages/spectator/TournamentList";
+import TournamentDetail from "./pages/spectator/TournamentDetail"; // ← Phase 4
+import PublicBracket from "./pages/spectator/PublicBracket"; // ← Phase 5
 
 ReactDOM.createRoot(document.getElementById("root")).render(
   <React.StrictMode>
@@ -55,6 +61,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
             <Route path="venues" element={<DirectorVenues />} />
             <Route path="events" element={<DirectorEvents />} />
             <Route path="events/:id/bracket" element={<EventBracket />} />
+            <Route path="help" element={<Help />} />
           </Route>
 
           {/* ── Umpire ──────────────────────────────────────────────────── */}
@@ -71,6 +78,16 @@ ReactDOM.createRoot(document.getElementById("root")).render(
                 <UmpireDashboard />
               </ProtectedUmpire>
             }
+          />
+          {/* ── Spectator portal (Phase 3) ─────────────────────────────── */}
+          <Route path="/spectator" element={<TournamentList />} />
+          <Route
+            path="/spectator/tournament/:id"
+            element={<TournamentDetail />}
+          />
+          <Route
+            path="/spectator/tournament/:id/event/:eventId/bracket"
+            element={<PublicBracket />}
           />
         </Routes>
       </BrowserRouter>

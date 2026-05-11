@@ -668,16 +668,24 @@ def reset_bracket(self, request, pk=None):
     return Response({'message': f'Bracket reset. {deleted} slots removed.'})
 
 
+from rest_framework.permissions import AllowAny as _AllowAny
 from .event_views import TournamentEventViewSet
 
+# bracket — public read, no login required
 TournamentEventViewSet.bracket = action(
-    detail=True, methods=['get'], url_path='bracket'
+    detail=True,
+    methods=['get'],
+    url_path='bracket',
+    permission_classes=[_AllowAny],
+    authentication_classes=[],        # skip JWT check entirely
 )(bracket)
 
+# generate_bracket — directors only (inherits viewset default IsAuthenticated)
 TournamentEventViewSet.generate_bracket = action(
     detail=True, methods=['post'], url_path='generate_bracket'
 )(generate_bracket)
 
+# reset_bracket — directors only
 TournamentEventViewSet.reset_bracket = action(
     detail=True, methods=['delete'], url_path='reset_bracket'
 )(reset_bracket)

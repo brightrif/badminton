@@ -1,7 +1,7 @@
 # match/event_views.py
 
 from rest_framework import viewsets, filters
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAuthenticated,AllowAny, SAFE_METHODS
 from rest_framework_simplejwt.authentication import JWTAuthentication
 from django_filters.rest_framework import DjangoFilterBackend
 
@@ -21,12 +21,21 @@ class TournamentEventViewSet(viewsets.ModelViewSet):
     queryset = TournamentEvent.objects.select_related("tournament").all()
     serializer_class       = TournamentEventSerializer
     authentication_classes = [JWTAuthentication]
-    permission_classes     = [IsAuthenticated]
+    # permission_classes     = [IsAuthenticated]
     filter_backends        = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields       = ["tournament", "match_type", "format"]
     search_fields          = ["name"]
     ordering_fields        = ["name", "created_at"]
     ordering               = ["name"]
+
+    def get_permissions(self):
+        """
+        GET (list, retrieve) → open to everyone, no login required.
+        POST, PATCH, PUT, DELETE → director must be authenticated.
+        """
+        if self.request.method in SAFE_METHODS:
+            return [AllowAny()]
+        return [IsAuthenticated()]
 
     def destroy(self, request, *args, **kwargs):
         from rest_framework.response import Response

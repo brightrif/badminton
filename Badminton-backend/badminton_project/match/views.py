@@ -279,12 +279,24 @@ class MatchViewSet(viewsets.ModelViewSet):
     ordering = ['-scheduled_time']
 
     def get_queryset(self):
-        return Match.objects.select_related(
-            'tournament', 'venue', 'court','event','assigned_umpire',
+        qs = Match.objects.select_related(
+            'tournament', 'venue', 'court', 'event', 'assigned_umpire',
             'player1_team1__country', 'player2_team1__country',
             'player1_team2__country', 'player2_team2__country',
             'server__country'
         ).prefetch_related('game_scores')
+
+        # ?date=2026-05-11  →  filter by scheduled day
+        date_param = self.request.query_params.get('date')
+        if date_param:
+            try:
+                from datetime import date
+                parsed = date.fromisoformat(date_param)   # accepts YYYY-MM-DD
+                qs = qs.filter(scheduled_time__date=parsed)
+            except ValueError:
+                pass   # ignore malformed dates — return unfiltered
+
+        return qs
 
     def get_serializer_class(self):
         if self.action == 'list':
