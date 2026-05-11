@@ -125,11 +125,14 @@ class MatchConsumer(AsyncWebsocketConsumer):
 
     async def _handle_set_server(self, data):
         player_id = data.get('player_id')
+        receiver_id = data.get('receiver_id')
         if not player_id:
             await self._send_error("'player_id' is required.")
             return
         try:
-            result = await self._set_server(int(player_id))
+            result = await self._set_server(
+                int(player_id), int(receiver_id) if receiver_id else None
+            )
             await self._broadcast(result)
         except Exception as e:
             print(f"[consumer] _handle_set_server ERROR: {e}")
@@ -184,27 +187,14 @@ class MatchConsumer(AsyncWebsocketConsumer):
         except Match.DoesNotExist:
             return None
 
-    # @database_sync_to_async
-    # def _apply_point(self, team: int) -> dict:
-    #     print(f"[consumer] _apply_point team={team} match_id={self.match_id}")
-    #     match  = Match.objects.prefetch_related('game_scores').get(pk=self.match_id)
-    #     print(f"[consumer] match status={match.status}")
-    #     result = match.apply_point(team)
-    #     print(f"[consumer] apply_point result={result}")
-    #     match.game_scores._result_cache = None  # bust the prefetch cache
-    #     result.update(self._build_game_scores(match))
-    #     result['server_id'] = match.server_id
-    #     result['match_id']  = match.id
-    #     result['error']     = None
-    #     return result
     @database_sync_to_async
     def _apply_point(self, team: int) -> dict:
         match = Match.objects.get(pk=self.match_id)   # ← no prefetch_related yet
         result = match.apply_point(team)
-        match = Match.objects.prefetch_related('game_scores').get(pk=self.match_id)
-        result.update(self._build_game_scores(match))
-        result['server_id'] = match.server_id
-        result['match_id']  = match.id
+        match_fresh = Match.objects.prefetch_related('game_scores').get(pk=self.match_id)
+        result.update(self._build_game_scores(match_fresh))
+        # result['server_id'] = match.server_id
+        result['match_id']  = match_fresh.id
         result['error']     = None
         return result
 
@@ -219,7 +209,7 @@ class MatchConsumer(AsyncWebsocketConsumer):
         return result
 
     @database_sync_to_async
-    def _set_server(self, player_id: int) -> dict:
+    def _set_server(self, player_id: int,receiver_id: int = None) -> dict:
         match  = Match.objects.get(pk=self.match_id)
         result = match.set_server(player_id)
         state  = self._build_state_snapshot(match)

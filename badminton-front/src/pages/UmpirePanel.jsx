@@ -98,9 +98,14 @@ export default function UmpirePanel() {
     if (state.status !== "Live") return;
     sendAction({ action: "undo", team });
   };
-
-  const handleSetServer = (id) => {
-    sendAction({ action: "set_server", player_id: id });
+  const [pendingServer, setPendingServer] = useState(null);
+  const handleSetServer = (serverId, receiverId = null) => {
+    sendAction({
+      action: "set_server",
+      player_id: serverId,
+      receiver_id: receiverId,
+    });
+    setPendingServer(null);
   };
 
   const handleStartMatch = () => {
@@ -130,6 +135,9 @@ export default function UmpirePanel() {
   const p2t1Name = matchMeta?.player2_team1_detail?.name ?? "";
   const p1t2Name = matchMeta?.player1_team2_detail?.name ?? "";
   const p2t2Name = matchMeta?.player2_team2_detail?.name ?? "";
+  const isDoubles =
+    matchMeta?.match_type === "DOUBLES" ||
+    matchMeta?.match_type === "MIXED_DOUBLES";
 
   const team1Name =
     [p1t1Name, p2t1Name].filter(Boolean).join(" / ") || "Team 1";
@@ -389,9 +397,21 @@ export default function UmpirePanel() {
       </div>
 
       {/* Serving selector */}
-      {players.length > 0 && isLive && (
+      {/* {players.length > 0 && isLive && (
         <div style={S.servingSection}>
           <span style={S.servingTitle}>🎾 SERVING</span>
+          <span
+            style={{
+              fontSize: "10px",
+              color: "rgba(232,255,71,0.45)",
+              display: "block",
+              textAlign: "center",
+              marginBottom: "8px",
+              letterSpacing: "0.5px",
+            }}
+          >
+            Auto-updated · tap to override
+          </span>
           <div style={S.servingBtns}>
             {players.map((p) => (
               <button
@@ -406,6 +426,162 @@ export default function UmpirePanel() {
               </button>
             ))}
           </div>
+        </div>
+      )} */}
+      {/* Serving selector */}
+      {players.length > 0 && isLive && (
+        <div style={S.servingSection}>
+          {/* ── Case 1: No server set yet (match just started) ── */}
+          {!state.serverId && (
+            <>
+              {/* Step 1 — pick server */}
+              <span style={S.servingTitle}>🏸 SET FIRST SERVER</span>
+              <span
+                style={{
+                  fontSize: "10px",
+                  color: "rgba(232,255,71,0.5)",
+                  display: "block",
+                  textAlign: "center",
+                  marginBottom: "8px",
+                }}
+              >
+                {isDoubles
+                  ? "Tap to select server — then pick receiver"
+                  : "Tap to set server"}
+              </span>
+              <div style={S.servingBtns}>
+                {players.map((p) => (
+                  <button
+                    key={p.id}
+                    style={{
+                      ...S.servingBtn,
+                      ...(pendingServer === p.id ? S.servingBtnActive : {}),
+                    }}
+                    onClick={
+                      () =>
+                        isDoubles
+                          ? setPendingServer(p.id) // doubles: pick server first, then receiver
+                          : handleSetServer(p.id) // singles: one tap, done
+                    }
+                  >
+                    {p.name.split(" ")[0]}
+                  </button>
+                ))}
+              </div>
+
+              {/* Step 2 — pick receiver (doubles only, shown after server is tapped) */}
+              {isDoubles && pendingServer && (
+                <>
+                  <span style={{ ...S.servingTitle, marginTop: "14px" }}>
+                    🏸 SET FIRST RECEIVER
+                  </span>
+                  <span
+                    style={{
+                      fontSize: "10px",
+                      color: "rgba(71,212,255,0.5)",
+                      display: "block",
+                      textAlign: "center",
+                      marginBottom: "8px",
+                    }}
+                  >
+                    Pick a player from the opposing team
+                  </span>
+                  <div style={S.servingBtns}>
+                    {players
+                      .filter((p) => {
+                        // only show opponents of the pending server
+                        const serverTeam = players.find(
+                          (x) => x.id === pendingServer,
+                        )?.team;
+                        return p.team !== serverTeam;
+                      })
+                      .map((p) => (
+                        <button
+                          key={p.id}
+                          style={{
+                            ...S.servingBtn,
+                            border: "1px solid rgba(71,212,255,0.4)",
+                            color: "#71d4ff",
+                          }}
+                          onClick={() => handleSetServer(pendingServer, p.id)}
+                        >
+                          {p.name.split(" ")[0]}
+                        </button>
+                      ))}
+                  </div>
+                </>
+              )}
+            </>
+          )}
+
+          {/* ── Case 2: Server already set — show auto-tracking + manual override ── */}
+          {state.serverId && (
+            <>
+              <span style={S.servingTitle}>🎾 SERVING</span>
+              <span
+                style={{
+                  fontSize: "10px",
+                  color: "rgba(232,255,71,0.45)",
+                  display: "block",
+                  textAlign: "center",
+                  marginBottom: "8px",
+                  letterSpacing: "0.5px",
+                }}
+              >
+                Auto-updated · tap to override
+              </span>
+              <div style={S.servingBtns}>
+                {players.map((p) => (
+                  <button
+                    key={p.id}
+                    style={{
+                      ...S.servingBtn,
+                      ...(state.serverId === p.id ? S.servingBtnActive : {}),
+                    }}
+                    onClick={
+                      () =>
+                        isDoubles
+                          ? setPendingServer(p.id) // doubles override: re-enter 2-step flow
+                          : handleSetServer(p.id) // singles override: one tap
+                    }
+                  >
+                    {p.name.split(" ")[0]}
+                  </button>
+                ))}
+              </div>
+
+              {/* Override receiver picker — doubles only */}
+              {isDoubles && pendingServer && (
+                <>
+                  <span style={{ ...S.servingTitle, marginTop: "14px" }}>
+                    🏸 SET RECEIVER
+                  </span>
+                  <div style={S.servingBtns}>
+                    {players
+                      .filter((p) => {
+                        const serverTeam = players.find(
+                          (x) => x.id === pendingServer,
+                        )?.team;
+                        return p.team !== serverTeam;
+                      })
+                      .map((p) => (
+                        <button
+                          key={p.id}
+                          style={{
+                            ...S.servingBtn,
+                            border: "1px solid rgba(71,212,255,0.4)",
+                            color: "#71d4ff",
+                          }}
+                          onClick={() => handleSetServer(pendingServer, p.id)}
+                        >
+                          {p.name.split(" ")[0]}
+                        </button>
+                      ))}
+                  </div>
+                </>
+              )}
+            </>
+          )}
         </div>
       )}
 
