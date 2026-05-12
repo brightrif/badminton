@@ -50,10 +50,12 @@ function MatchRow({ m }) {
 
 export default function Dashboard() {
   const { data: tournaments } = useApi("/api/tournaments/");
-  const { data: matches } = useApi("/api/matches/");
   const { data: players } = useApi("/api/players/");
-  const { data: live } = useApi("/api/matches/live/");
-  const { data: today } = useApi("/api/matches/today/");
+
+  // Live data -pool every 10 seconds
+  const { data: matches } = useApi("/api/matches/", [], 10_000);
+  const { data: live } = useApi("/api/matches/live/", [], 10_000);
+  const { data: today } = useApi("/api/matches/today/", [], 10_000);
 
   const liveArr = Array.isArray(live) ? live : [];
   const todayArr = Array.isArray(today) ? today : [];

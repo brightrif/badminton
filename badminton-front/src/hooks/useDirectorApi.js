@@ -5,17 +5,17 @@
 import { useState, useEffect, useCallback } from "react";
 import { useAuth } from "../context/AuthContext";
 
-export function useDirectorApi(url, deps = []) {
+export function useDirectorApi(url, deps = [], pollInterval = 0) {
   const { authFetch } = useAuth();
-  const [data,    setData]    = useState(null);
+  const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [error,   setError]   = useState(null);
+  const [error, setError] = useState(null);
 
   const refresh = useCallback(async () => {
     if (!url) return;
     setLoading(true);
     try {
-      const res  = await authFetch(url);
+      const res = await authFetch(url);
       const json = await res.json();
       setData(Array.isArray(json) ? json : (json.results ?? json));
       setError(null);
@@ -26,6 +26,11 @@ export function useDirectorApi(url, deps = []) {
     }
   }, [url, authFetch]);
 
-  useEffect(() => { refresh(); }, [refresh, ...deps]);
+  useEffect(() => {
+    refresh();
+    if (!pollInterval) return;
+    const t = setInterval(refresh, pollInterval);
+    return () => clearInterval(t);
+  }, [refresh, pollInterval, ...deps]);
   return { data, loading, error, refresh };
 }
